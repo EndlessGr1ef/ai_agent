@@ -1,8 +1,14 @@
 """Main entry point for the LLM agent."""
 
 import sys
+from pathlib import Path
 
-from config import build_llm, require_api_key, build_retriever
+# Add src directory to Python path
+src_path = Path(__file__).parent
+sys.path.insert(0, str(src_path))
+
+from config.llm_config import build_llm, require_api_key
+from config.retriever import build_retriever
 from agents import ChatAgent, RagAgent
 from utils.arg_parser import parse_args
 
@@ -21,6 +27,7 @@ def main() -> None:
         base_url=args.base_url,
         model=args.model,
         temperature=args.temperature,
+        timeout=args.timeout,
     )
 
     # Initialize context compressor

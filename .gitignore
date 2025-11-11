@@ -160,7 +160,7 @@ cython_debug/
 .idea/
 
 # VS Code
-.vscode/
+# .vscode/
 
 # ChromaDB - Vector Database
 # This directory contains SQLite database files and collection data that shouldn't be committed

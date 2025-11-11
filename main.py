@@ -27,7 +27,7 @@ def require_api_key() -> str:
     return api_key
 
 
-def chat_once(client: OpenAI, model: str, prompt: str, system_prompt: str = "You are a helpful assistant.") -> str:
+def chat_once(client: OpenAI, model: str, prompt: str, system_prompt: str = "You are a helpful assistant.", timeout: int = 300) -> str:
     """Execute a single-turn chat and return assistant text."""
     messages: List[Dict[str, str]] = [
         {"role": "system", "content": system_prompt},
@@ -38,14 +38,15 @@ def chat_once(client: OpenAI, model: str, prompt: str, system_prompt: str = "You
         messages=messages,
         temperature=0.7,
         extra_body={"reasoning_split": True},
+        timeout=timeout,
     )
     return resp.choices[0].message.content
 
 
-def chat_loop(client: OpenAI, model: str, system_prompt: str = "You are a helpful assistant.") -> None:
+def chat_loop(client: OpenAI, model: str, system_prompt: str = "You are a helpful assistant.", timeout: int = 30) -> None:
     """Interactive multi-turn session. Type /exit or /quit to leave."""
     messages: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
-    print("\n===== OpenAI Test Agent (interactive) =====")
+    print("\n===== AI Agent (interactive) =====")
     print("Tip: type /exit or /quit to exit; type /reset to reset the conversation.\n")
 
     while True:
@@ -72,6 +73,7 @@ def chat_loop(client: OpenAI, model: str, system_prompt: str = "You are a helpfu
                 messages=messages,
                 temperature=0.7,
                 extra_body={"reasoning_split": True},
+                timeout=timeout,
             )
             assistant_msg = resp.choices[0].message.content
         except Exception as e:
@@ -106,6 +108,13 @@ def parse_args() -> argparse.Namespace:
         default=os.getenv("OPENAI_BASE_URL", "https://api.minimax.io/v1"),
         help="Custom OpenAI-compatible API base_url (default from env OPENAI_BASE_URL or 'https://api.minimax.io/v1')",
     )
+    parser.add_argument(
+        "-t",
+        "--timeout",
+        type=int,
+        default=300,
+        help="Request timeout in seconds (default: 300)",
+    )
     return parser.parse_args()
 
 
@@ -117,6 +126,7 @@ def main() -> None:
     model = args.model
     system_prompt = args.system
     base_url = args.base_url
+    timeout = args.timeout
 
     # Initialize client with custom base_url and API key
     client = OpenAI(api_key=api_key, base_url=base_url)
@@ -124,7 +134,7 @@ def main() -> None:
     if args.prompt:
         # Single-turn mode
         try:
-            answer = chat_once(client, model, prompt=args.prompt, system_prompt=system_prompt)
+            answer = chat_once(client, model, prompt=args.prompt, system_prompt=system_prompt, timeout=timeout)
         except Exception as e:
             print(f"[Error] Request failed: {e}")
             sys.exit(2)
@@ -132,7 +142,7 @@ def main() -> None:
         print(answer)
     else:
         # Interactive mode
-        chat_loop(client, model, system_prompt)
+        chat_loop(client, model, system_prompt, timeout)
 
 
 if __name__ == "__main__":

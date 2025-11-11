@@ -1,0 +1,110 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: Agent (src.main) - Chat",
+      "type": "python",
+      "request": "launch",
+      "module": "src.main",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      },
+      "justMyCode": true
+    },
+    {
+      "name": "Python: Agent (src.main) - RAG",
+      "type": "python",
+      "request": "launch",
+      "module": "src.main",
+      "args": [
+        "--use-rag",
+        "--chroma-host", "localhost",
+        "--chroma-port", "9000"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      },
+      "justMyCode": true
+    },
+    {
+      "name": "Python: Agent (src.main) - Chat + Compression",
+      "type": "python",
+      "request": "launch",
+      "module": "src.main",
+      "args": [
+        "--enable-compression",
+        "--max-tokens", "8000"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      },
+      "justMyCode": true
+    },
+    {
+      "name": "Python: Test Agent (main.py) - Interactive",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "justMyCode": true
+    },
+    {
+      "name": "Python: Test Agent (main.py) - Single Turn",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "args": ["-p", "你好，帮我写一个Todo示例"],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "justMyCode": true
+    },
+    {
+      "name": "Python: Ingest Markdown (ingest_md.py)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/ingest_md.py",
+      "args": [
+        "--docs-dir", "${workspaceFolder}/docs",
+        "--chroma-host", "localhost",
+        "--chroma-port", "9000"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "justMyCode": true
+    },
+    {
+      "name": "Python: Chroma Query Tool",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/chroma_query_tool.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "justMyCode": true
+    },
+    {
+      "name": "Python: Agent (lc_agent.py wrapper)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/lc_agent.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "justMyCode": true
+    }
+  ]
+}
+

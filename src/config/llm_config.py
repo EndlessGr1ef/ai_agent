@@ -27,7 +27,8 @@ def build_llm(
     api_key: str,
     base_url: str,
     model: str,
-    temperature: float = 0.6
+    temperature: float = 0.6,
+    timeout: int = 30
 ) -> ChatOpenAI:
     """Create a ChatOpenAI instance with custom base_url and model."""
     return ChatOpenAI(
@@ -35,6 +36,7 @@ def build_llm(
         base_url=base_url,
         model=model,
         temperature=temperature,
+        request_timeout=timeout,
     )
 
 

@@ -37,6 +37,12 @@ def parse_args() -> argparse.Namespace:
         default=0.5,
         help="Sampling temperature (default 0.5)",
     )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=300,
+        help="Request timeout in seconds (default: 300)",
+    )
     # RAG options
     parser.add_argument(
         "--use-rag",
@@ -113,8 +119,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-tokens",
         type=int,
-        default=8000,
-        help="Maximum token limit for context compression (default: 80000, 80% of 100K)"
+        default=80000,
+        help="Maximum token limit for context compression (default: 80000, 80%% of 100K)"
     )
 
     return parser.parse_args()
