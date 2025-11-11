@@ -184,5 +184,10 @@ Desktop.ini
 # Temporary files
 *.tmp
 *.swp
-*.swo
 *~
+
+# Claude CLI settings
+/.claude/
+CLAUDE.md
+
+
