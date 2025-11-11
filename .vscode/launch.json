@@ -50,27 +50,6 @@
       "justMyCode": true
     },
     {
-      "name": "Python: Test Agent (main.py) - Interactive",
-      "type": "python",
-      "request": "launch",
-      "program": "${workspaceFolder}/main.py",
-      "console": "integratedTerminal",
-      "cwd": "${workspaceFolder}",
-      "envFile": "${workspaceFolder}/.env",
-      "justMyCode": true
-    },
-    {
-      "name": "Python: Test Agent (main.py) - Single Turn",
-      "type": "python",
-      "request": "launch",
-      "program": "${workspaceFolder}/main.py",
-      "args": ["-p", "你好，帮我写一个Todo示例"],
-      "console": "integratedTerminal",
-      "cwd": "${workspaceFolder}",
-      "envFile": "${workspaceFolder}/.env",
-      "justMyCode": true
-    },
-    {
       "name": "Python: Ingest Markdown (ingest_md.py)",
       "type": "python",
       "request": "launch",
@@ -94,17 +73,6 @@
       "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
       "justMyCode": true
-    },
-    {
-      "name": "Python: Agent (lc_agent.py wrapper)",
-      "type": "python",
-      "request": "launch",
-      "program": "${workspaceFolder}/lc_agent.py",
-      "console": "integratedTerminal",
-      "cwd": "${workspaceFolder}",
-      "envFile": "${workspaceFolder}/.env",
-      "justMyCode": true
     }
   ]
 }
-
