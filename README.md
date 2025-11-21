@@ -75,7 +75,7 @@ pip install transformers
 ### 2. 配置 .env
 ```bash
 # .env
-OPENAI_API_KEY=eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...
+OPENAI_API_KEY=your_api_key
 OPENAI_MODEL=MiniMax-M2
 OPENAI_BASE_URL=https://api.minimax.io/v1
 OPENAI_SYSTEM_PROMPT=You are a helpful assistant for software development.

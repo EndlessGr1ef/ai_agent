@@ -123,4 +123,24 @@ def parse_args() -> argparse.Namespace:
         help="Maximum token limit for context compression (default: 80000, 80%% of 100K)"
     )
 
+    # Memory options
+    parser.add_argument(
+        "--session-id",
+        type=str,
+        help="会话 ID，启用记忆功能"
+    )
+    parser.add_argument(
+        "--memory-collection",
+        type=str,
+        default="agent_memory",
+        help="记忆集合名称（默认: agent_memory）"
+    )
+    parser.add_argument(
+        "--memory-k",
+        type=int,
+        default=5,
+        help="检索历史记忆的数量（默认: 5）"
+    )
+
     return parser.parse_args()
+

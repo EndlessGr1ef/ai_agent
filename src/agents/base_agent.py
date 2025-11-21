@@ -19,7 +19,10 @@ class BaseAgent(ABC):
         llm: ChatOpenAI,
         system_prompt: str = "You are a helpful assistant for software development.",
         compressor=None,
-        enable_compression: bool = False
+        enable_compression: bool = False,
+        session_id: Optional[str] = None,
+        memory_manager=None,
+        memory_k: int = 5
     ):
         """Initialize the base agent.
 
@@ -28,11 +31,17 @@ class BaseAgent(ABC):
             system_prompt: The system prompt to use
             compressor: The context compressor instance
             enable_compression: Whether to enable context compression
+            session_id: Optional session ID for memory persistence
+            memory_manager: Optional MemoryManager instance
+            memory_k: Number of memories to retrieve (default: 5)
         """
         self.llm = llm
         self.system_prompt = system_prompt
         self.compressor = compressor
         self.enable_compression = enable_compression
+        self.session_id = session_id
+        self.memory_manager = memory_manager
+        self.memory_k = memory_k
         self.stream_processor = StreamProcessor()
         self.output_formatter = OutputFormatter()
 
@@ -152,6 +161,48 @@ class BaseAgent(ABC):
         current_tokens = self._count_tokens(messages)
         used_percent = current_tokens / max_tokens * 100
         print(f"[Info] Total tokens: {current_tokens:,} / {max_tokens:,} ({used_percent:.1f}% of limit)")
+
+    def _retrieve_memories(self, query: str) -> str:
+        """Retrieve relevant memories and format as context.
+
+        Args:
+            query: Query text for semantic search
+
+        Returns:
+            Formatted memory context string
+        """
+        if not self.session_id or not self.memory_manager:
+            return ""
+
+        memories = self.memory_manager.retrieve_relevant_memories(
+            session_id=self.session_id,
+            query=query,
+            k=self.memory_k
+        )
+
+        if not memories:
+            return ""
+
+        return "\n".join(memories)
+
+    def _save_conversation_turn(self, user_msg: str, assistant_msg: str, turn_id: int):
+        """Save a conversation turn to memory.
+
+        Args:
+            user_msg: User message content
+            assistant_msg: Assistant response content
+            turn_id: Turn number in the conversation
+        """
+        if self.session_id and self.memory_manager:
+            try:
+                self.memory_manager.save_turn(
+                    session_id=self.session_id,
+                    user_msg=user_msg,
+                    assistant_msg=assistant_msg,
+                    turn_id=turn_id
+                )
+            except Exception as e:
+                self.output_formatter.print_error(f"Failed to save memory: {e}")
 
     @abstractmethod
     def run(self):

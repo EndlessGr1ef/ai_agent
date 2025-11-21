@@ -45,6 +45,30 @@ def main() -> None:
             print("⚠️  Context compression requested but compressor not available")
             print("   Install with: pip install transformers")
 
+    # Initialize memory manager if session_id is provided
+    memory_manager = None
+    if args.session_id:
+        try:
+            from utils.memory_manager import MemoryManager
+            from config.embeddings import build_embeddings
+            
+            embeddings = build_embeddings(args.embed_model)
+            chroma_client = None
+            
+            # Create Chroma client (will be used for memory)
+            from config.llm_config import create_chroma_client
+            chroma_client = create_chroma_client(args.chroma_host, args.chroma_port)
+            
+            memory_manager = MemoryManager(
+                chroma_client=chroma_client,
+                collection_name=args.memory_collection,
+                embeddings=embeddings
+            )
+            print(f"✓ Memory enabled (session: {args.session_id}, collection: {args.memory_collection})")
+        except Exception as e:
+            print(f"⚠️  Failed to initialize memory manager: {e}")
+            print("   Continuing without memory functionality")
+
     # Choose and run the appropriate agent
     if args.use_rag:
         try:
@@ -67,7 +91,10 @@ def main() -> None:
                 llm=llm,
                 system_prompt=args.system,
                 compressor=compressor,
-                enable_compression=args.enable_compression
+                enable_compression=args.enable_compression,
+                session_id=args.session_id,
+                memory_manager=memory_manager,
+                memory_k=args.memory_k
             )
             agent.run()
             return
@@ -92,7 +119,10 @@ def main() -> None:
             retriever=retriever,
             system_prompt=args.system,
             compressor=compressor,
-            enable_compression=args.enable_compression
+            enable_compression=args.enable_compression,
+            session_id=args.session_id,
+            memory_manager=memory_manager,
+            memory_k=args.memory_k
         )
         agent.run()
     else:
@@ -101,7 +131,10 @@ def main() -> None:
             llm=llm,
             system_prompt=args.system,
             compressor=compressor,
-            enable_compression=args.enable_compression
+            enable_compression=args.enable_compression,
+            session_id=args.session_id,
+            memory_manager=memory_manager,
+            memory_k=args.memory_k
         )
         agent.run()
 

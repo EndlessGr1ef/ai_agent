@@ -1,7 +1,7 @@
 """RAG agent implementation."""
 
 import os
-from typing import List
+from typing import List, Optional
 
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
@@ -18,7 +18,10 @@ class RagAgent(BaseAgent):
         retriever,
         system_prompt: str = "You are a helpful assistant for software development.",
         compressor=None,
-        enable_compression: bool = False
+        enable_compression: bool = False,
+        session_id: Optional[str] = None,
+        memory_manager=None,
+        memory_k: int = 5
     ):
         """Initialize the RAG agent.
 
@@ -28,8 +31,11 @@ class RagAgent(BaseAgent):
             system_prompt: The system prompt to use
             compressor: The context compressor instance
             enable_compression: Whether to enable context compression
+            session_id: Optional session ID for memory persistence
+            memory_manager: Optional MemoryManager instance
+            memory_k: Number of memories to retrieve (default: 5)
         """
-        super().__init__(llm, system_prompt, compressor, enable_compression)
+        super().__init__(llm, system_prompt, compressor, enable_compression, session_id, memory_manager, memory_k)
         self.retriever = retriever
 
     def _retrieve_and_build_context(self, user_input: str) -> str:
@@ -72,6 +78,20 @@ class RagAgent(BaseAgent):
         print()
 
         compression_counter = 0
+        turn_counter = 0  # Turn counter for memory
+
+        # Load session history if session_id is provided
+        if self.session_id and self.memory_manager:
+            try:
+                history = self.memory_manager.get_session_history(self.session_id, limit=10)
+                for user_msg, assistant_msg in history:
+                    messages.append(HumanMessage(content=user_msg))
+                    messages.append(AIMessage(content=assistant_msg))
+                    turn_counter += 1
+                if history:
+                    print(f"[Info] Loaded {len(history)} previous conversation turns from session '{self.session_id}'")
+            except Exception as e:
+                self.output_formatter.print_error(f"Failed to load session history: {e}")
 
         while True:
             try:
@@ -104,12 +124,27 @@ class RagAgent(BaseAgent):
                 # Retrieve relevant documents and build context
                 prompt_with_context = self._retrieve_and_build_context(user_input)
 
+                # Retrieve relevant memories if enabled
+                if self.session_id and self.memory_manager:
+                    relevant_memories = self._retrieve_memories(user_input)
+                    if relevant_memories:
+                        # Combine RAG context with memory context
+                        prompt_with_context = (
+                            f"[相关历史记忆]\n{relevant_memories}\n\n"
+                            f"{prompt_with_context}"
+                        )
+
                 # Add user input to message list
                 messages.append(HumanMessage(content=prompt_with_context))
 
                 # Process the request
                 assistant_msg = self._process_streaming(messages, max_tokens)
                 messages.append(AIMessage(content=assistant_msg))
+                turn_counter += 1
+
+                # Save the conversation turn to memory
+                if self.session_id and self.memory_manager:
+                    self._save_conversation_turn(user_input, assistant_msg, turn_counter)
 
                 # Check if context compression is needed
                 compression_counter = self._handle_compression(messages, compression_counter)
