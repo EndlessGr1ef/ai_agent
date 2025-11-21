@@ -16,27 +16,36 @@ class RagAgent(BaseAgent):
         self,
         llm: ChatOpenAI,
         retriever,
-        system_prompt: str = "You are a helpful assistant for software development.",
+        system_prompt: str = None,  # Default to dual output prompt
         compressor=None,
         enable_compression: bool = False,
         session_id: Optional[str] = None,
         memory_manager=None,
-        memory_k: int = 5
+        memory_k: int = 5,
+        use_dual_output: bool = True  # New parameter to control dual output
     ):
         """Initialize the RAG agent.
 
         Args:
             llm: The language model to use
             retriever: The retriever to use for document retrieval
-            system_prompt: The system prompt to use
+            system_prompt: The system prompt to use (defaults to dual output if use_dual_output=True)
             compressor: The context compressor instance
             enable_compression: Whether to enable context compression
             session_id: Optional session ID for memory persistence
             memory_manager: Optional MemoryManager instance
             memory_k: Number of memories to retrieve (default: 5)
+            use_dual_output: Whether to use dual output prompt for summary extraction (default: True)
         """
+        # Use dual output prompt by default if not specified
+        if system_prompt is None and use_dual_output:
+            system_prompt = self.DUAL_OUTPUT_SYSTEM_PROMPT
+        elif system_prompt is None:
+            system_prompt = "You are a helpful assistant."
+
         super().__init__(llm, system_prompt, compressor, enable_compression, session_id, memory_manager, memory_k)
         self.retriever = retriever
+        self.use_dual_output = use_dual_output
 
     def _retrieve_and_build_context(self, user_input: str) -> str:
         """Retrieve relevant documents and build context.
@@ -138,13 +147,31 @@ class RagAgent(BaseAgent):
                 messages.append(HumanMessage(content=prompt_with_context))
 
                 # Process the request
-                assistant_msg = self._process_streaming(messages, max_tokens)
+                raw_response = self._process_streaming(messages, max_tokens)
+
+                # Parse dual output if enabled
+                if self.use_dual_output:
+                    full_answer, summary_text = self._parse_dual_output(raw_response)
+                    assistant_msg = full_answer
+                else:
+                    assistant_msg = raw_response
+                    summary_text = None
+
                 messages.append(AIMessage(content=assistant_msg))
                 turn_counter += 1
 
-                # Save the conversation turn to memory
+                # Save the conversation turn to memory with extracted summary and content if available
                 if self.session_id and self.memory_manager:
-                    self._save_conversation_turn(user_input, assistant_msg, turn_counter)
+                    if self.use_dual_output and summary_text:
+                        self._save_conversation_turn(
+                            user_input,
+                            raw_response,
+                            turn_counter,
+                            summary=summary_text,
+                            content=full_answer
+                        )
+                    else:
+                        self._save_conversation_turn(user_input, assistant_msg, turn_counter)
 
                 # Check if context compression is needed
                 compression_counter = self._handle_compression(messages, compression_counter)

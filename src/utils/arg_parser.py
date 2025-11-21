@@ -34,14 +34,14 @@ def parse_args() -> argparse.Namespace:
         "-t",
         "--temperature",
         type=float,
-        default=0.5,
-        help="Sampling temperature (default 0.5)",
+        default=float(os.getenv("OPENAI_TEMPERATURE", "0.5")),
+        help="Sampling temperature (default from env OPENAI_TEMPERATURE or 0.5)",
     )
     parser.add_argument(
         "--timeout",
         type=int,
-        default=300,
-        help="Request timeout in seconds (default: 300)",
+        default=int(os.getenv("REQUEST_TIMEOUT", "300")),
+        help="Request timeout in seconds (default from env REQUEST_TIMEOUT or 300)",
     )
     # RAG options
     parser.add_argument(
@@ -119,8 +119,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-tokens",
         type=int,
-        default=80000,
-        help="Maximum token limit for context compression (default: 80000, 80%% of 100K)"
+        default=int(os.getenv("MAX_TOKENS", "80000")),
+        help="Maximum token limit for context compression (default from env MAX_TOKENS or 80000)"
     )
 
     # Memory options
@@ -132,14 +132,36 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--memory-collection",
         type=str,
-        default="agent_memory",
-        help="记忆集合名称（默认: agent_memory）"
+        default=os.getenv("MEMORY_COLLECTION", "agent_memory"),
+        help="记忆集合名称（default from env MEMORY_COLLECTION or agent_memory）"
     )
     parser.add_argument(
         "--memory-k",
         type=int,
-        default=5,
-        help="检索历史记忆的数量（默认: 5）"
+        default=int(os.getenv("MEMORY_K", "5")),
+        help="检索历史记忆的数量（default from env MEMORY_K or 5）"
+    )
+
+    # Dual output (JSON format) options
+    parser.add_argument(
+        "--disable-dual-output",
+        action="store_true",
+        default=False,
+        help="禁用 JSON 双输出格式（摘要+内容）"
+    )
+
+    # Thinking process display options
+    parser.add_argument(
+        "--show-thinking",
+        action="store_true",
+        default=False,
+        help="默认显示思考过程"
+    )
+    parser.add_argument(
+        "--hide-thinking",
+        action="store_true",
+        default=False,
+        help="默认隐藏思考过程"
     )
 
     return parser.parse_args()

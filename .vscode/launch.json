@@ -20,9 +20,7 @@
       "request": "launch",
       "module": "src.main",
       "args": [
-        "--use-rag",
-        "--chroma-host", "localhost",
-        "--chroma-port", "9000"
+        "--use-rag"
       ],
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}",
@@ -50,14 +48,45 @@
       "justMyCode": true
     },
     {
+      "name": "Python: Agent (src.main) - Memory Mode",
+      "type": "python",
+      "request": "launch",
+      "module": "src.main",
+      "args": [
+        "--session-id", "session-${input:sessionId}"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      },
+      "justMyCode": true
+    },
+    {
+      "name": "Python: Agent (src.main) - RAG + Memory",
+      "type": "python",
+      "request": "launch",
+      "module": "src.main",
+      "args": [
+        "--use-rag",
+        "--session-id", "session-${input:sessionId}"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      },
+      "justMyCode": true
+    },
+    {
       "name": "Python: Ingest Markdown (ingest_md.py)",
       "type": "python",
       "request": "launch",
       "program": "${workspaceFolder}/ingest_md.py",
       "args": [
-        "--docs-dir", "${workspaceFolder}/docs",
-        "--chroma-host", "localhost",
-        "--chroma-port", "9000"
+        "--docs-dir", "${workspaceFolder}/docs"
       ],
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}",
@@ -73,6 +102,14 @@
       "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
       "justMyCode": true
+    }
+  ],
+  "inputs": [
+    {
+      "id": "sessionId",
+      "description": "Enter a session ID for memory mode",
+      "default": "default",
+      "type": "promptString"
     }
   ]
 }

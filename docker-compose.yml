@@ -1,15 +1,25 @@
-version: '3.9'
-
 services:
   chromadb:
-    image: chromadb/chroma:0.6.3
+    image: chromadb/chroma:1.3.5
     container_name: chromadb
     environment:
+      # 持久化存储
       - IS_PERSISTENT=TRUE
       - PERSIST_DIRECTORY=/chroma/chroma
-      - ANONYMIZED_TELEMETRY=TRUE
+      # 遥测设置（1.x 版本调整了变量名）
+      - ANONYMIZED_TELEMETRY_ENABLED=TRUE
+      - ALLOW_RESET=TRUE
     volumes:
+      # 持久化数据目录
       - ./chromadb:/chroma/chroma
     ports:
+      # 暴露 HTTP 端口（默认 8000）
       - "9000:8000"
     restart: unless-stopped
+    healthcheck:
+      # 健康检查（确保服务启动完成）
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

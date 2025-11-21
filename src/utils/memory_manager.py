@@ -40,40 +40,78 @@ class MemoryManager:
         session_id: str,
         user_msg: str,
         assistant_msg: str,
-        turn_id: int
+        turn_id: int,
+        assistant_summary: str = None,
+        assistant_content: str = None
     ):
-        """Save a conversation turn to memory.
+        """Save a conversation turn to memory with separate summary and content.
 
         Args:
             session_id: Unique session identifier
             user_msg: User message content
-            assistant_msg: Assistant response content
+            assistant_msg: Assistant response content (full response)
             turn_id: Turn number in the conversation
+            assistant_summary: Optional pre-extracted summary for memory storage
+            assistant_content: Optional separate content for memory storage
         """
         timestamp = datetime.now().isoformat()
-        
-        # Create documents for user and assistant messages
-        documents = [
-            Document(
-                page_content=user_msg,
-                metadata={
-                    "session_id": session_id,
-                    "timestamp": timestamp,
-                    "role": "user",
-                    "turn_id": turn_id
-                }
-            ),
-            Document(
-                page_content=assistant_msg,
-                metadata={
-                    "session_id": session_id,
-                    "timestamp": timestamp,
-                    "role": "assistant",
-                    "turn_id": turn_id
-                }
-            )
-        ]
-        
+
+        # If summary and content are provided separately, store them individually
+        if assistant_summary and assistant_content:
+            documents = [
+                Document(
+                    page_content=user_msg,
+                    metadata={
+                        "session_id": session_id,
+                        "timestamp": timestamp,
+                        "role": "user",
+                        "turn_id": turn_id
+                    }
+                ),
+                Document(
+                    page_content=assistant_summary,
+                    metadata={
+                        "session_id": session_id,
+                        "timestamp": timestamp,
+                        "role": "assistant_summary",
+                        "turn_id": turn_id,
+                        "content_type": "summary"
+                    }
+                ),
+                Document(
+                    page_content=assistant_content,
+                    metadata={
+                        "session_id": session_id,
+                        "timestamp": timestamp,
+                        "role": "assistant_content",
+                        "turn_id": turn_id,
+                        "content_type": "full_content"
+                    }
+                )
+            ]
+        else:
+            # Fallback: store as single assistant message
+            documents = [
+                Document(
+                    page_content=user_msg,
+                    metadata={
+                        "session_id": session_id,
+                        "timestamp": timestamp,
+                        "role": "user",
+                        "turn_id": turn_id
+                    }
+                ),
+                Document(
+                    page_content=assistant_msg,
+                    metadata={
+                        "session_id": session_id,
+                        "timestamp": timestamp,
+                        "role": "assistant",
+                        "turn_id": turn_id
+                    }
+                )
+            ]
+
         # Add to vector store
         self.vector_store.add_documents(documents)
 
@@ -81,7 +119,8 @@ class MemoryManager:
         self,
         session_id: str,
         query: str,
-        k: int = 5
+        k: int = 5,
+        content_type: str = "all"  # "all", "summary", "full_content"
     ) -> List[str]:
         """Retrieve semantically relevant memories from the session.
 
@@ -89,29 +128,37 @@ class MemoryManager:
             session_id: Session identifier to filter by
             query: Query text for semantic search
             k: Number of memories to retrieve
+            content_type: Type of content to retrieve ("all", "summary", "full_content")
 
         Returns:
             List of relevant memory texts
         """
         # Build filter for the specific session
         filter_dict = {"session_id": session_id}
-        
+
+        # Add content type filter if specified
+        if content_type == "summary":
+            filter_dict["content_type"] = "summary"
+        elif content_type == "full_content":
+            filter_dict["content_type"] = "full_content"
+
         # Perform similarity search
         results = self.vector_store.similarity_search(
             query=query,
             k=k,
             filter=filter_dict
         )
-        
+
         # Extract and format results
         memories = []
         for doc in results:
             role = doc.metadata.get("role", "unknown")
             turn_id = doc.metadata.get("turn_id", "?")
             content = doc.page_content
+            content_type = doc.metadata.get("content_type", "unknown")
             formatted = f"[Turn {turn_id} - {role}]: {content}"
             memories.append(formatted)
-        
+
         return memories
 
     def get_session_history(

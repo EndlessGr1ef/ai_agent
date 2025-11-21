@@ -69,6 +69,9 @@ def main() -> None:
             print(f"⚠️  Failed to initialize memory manager: {e}")
             print("   Continuing without memory functionality")
 
+    # Determine thinking display mode from command line args
+    show_thinking = args.show_thinking and not args.hide_thinking
+
     # Choose and run the appropriate agent
     if args.use_rag:
         try:
@@ -96,6 +99,7 @@ def main() -> None:
                 memory_manager=memory_manager,
                 memory_k=args.memory_k
             )
+            agent.output_formatter.show_thinking = show_thinking
             agent.run()
             return
 
@@ -114,6 +118,7 @@ def main() -> None:
             print("="*60 + "\n")
 
         # Run RAG agent
+        use_dual_output = not args.disable_dual_output
         agent = RagAgent(
             llm=llm,
             retriever=retriever,
@@ -122,11 +127,14 @@ def main() -> None:
             enable_compression=args.enable_compression,
             session_id=args.session_id,
             memory_manager=memory_manager,
-            memory_k=args.memory_k
+            memory_k=args.memory_k,
+            use_dual_output=use_dual_output
         )
+        agent.output_formatter.show_thinking = show_thinking
         agent.run()
     else:
         # Run chat agent
+        use_dual_output = not args.disable_dual_output
         agent = ChatAgent(
             llm=llm,
             system_prompt=args.system,
@@ -134,8 +142,10 @@ def main() -> None:
             enable_compression=args.enable_compression,
             session_id=args.session_id,
             memory_manager=memory_manager,
-            memory_k=args.memory_k
+            memory_k=args.memory_k,
+            use_dual_output=use_dual_output
         )
+        agent.output_formatter.show_thinking = show_thinking
         agent.run()
 
 

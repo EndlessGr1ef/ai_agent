@@ -19,30 +19,39 @@ class ChatAgent(BaseAgent):
     def __init__(
         self,
         llm: ChatOpenAI,
-        system_prompt: str = "You are a helpful assistant for software development.",
+        system_prompt: str = None,  # Default to dual output prompt
         compressor=None,
         enable_compression: bool = False,
         session_id: Optional[str] = None,
         memory_manager=None,
-        memory_k: int = 5
+        memory_k: int = 5,
+        use_dual_output: bool = True  # New parameter to control dual output
     ):
         """Initialize the chat agent.
 
         Args:
             llm: The language model to use
-            system_prompt: The system prompt to use
+            system_prompt: The system prompt to use (defaults to dual output if use_dual_output=True)
             compressor: The context compressor instance
             enable_compression: Whether to enable context compression
             session_id: Optional session ID for memory persistence
             memory_manager: Optional MemoryManager instance
             memory_k: Number of memories to retrieve (default: 5)
+            use_dual_output: Whether to use dual output prompt for summary extraction (default: True)
         """
+        # Use dual output prompt by default if not specified
+        if system_prompt is None and use_dual_output:
+            system_prompt = self.DUAL_OUTPUT_SYSTEM_PROMPT
+        elif system_prompt is None:
+            system_prompt = "You are a helpful assistant."
+
         super().__init__(llm, system_prompt, compressor, enable_compression, session_id, memory_manager, memory_k)
         # Initialize tool registry and register built-in tools
         self.tool_registry = ToolRegistry()
         self.tool_registry.register(build_markdown_create_tool())
         self.tool_registry.register(build_web_search_tool())
         self.output_formatter: OutputFormatter = self.output_formatter
+        self.use_dual_output = use_dual_output
 
     def _try_handle_command(self, user_input: str) -> bool:
         """
@@ -147,6 +156,8 @@ class ChatAgent(BaseAgent):
         compression_counter = 0  # Compression counter
         turn_counter = 0  # Turn counter for memory
 
+        # Keyboard listener removed - no longer needed
+
         # Load session history if session_id is provided
         if self.session_id and self.memory_manager:
             try:
@@ -165,15 +176,20 @@ class ChatAgent(BaseAgent):
                 user_input = input("You: ").strip()
             except (KeyboardInterrupt, EOFError):
                 print("\n[Info] Exited.")
+                # Keyboard listener removed
                 if compression_counter > 0:
                     print(f"[Info] Total compressions performed: {compression_counter}")
                 self._print_token_stats(messages, max_tokens)
                 break
+            except UnicodeDecodeError:
+                print("\n[Warning] Input encoding error. Please try again.")
+                continue
 
             if not user_input:
                 continue
             if user_input.lower() in {"/exit", "/quit"}:
                 print("[Info] Bye!")
+                # Keyboard listener removed
                 if compression_counter > 0:
                     print(f"[Info] Total compressions performed: {compression_counter}")
                 self._print_token_stats(messages, max_tokens)
@@ -217,13 +233,32 @@ class ChatAgent(BaseAgent):
 
             # Process the request
             try:
-                assistant_msg = self._process_streaming(messages, max_tokens)
+                # Get raw response from LLM (timer will be started automatically)
+                raw_response = self._process_streaming(messages, max_tokens)
+
+                # Get token statistics from stream processor
+                token_stats = self.stream_processor.get_stats()
+
+                # Parse dual output if enabled
+                full_answer, summary_text = self._parse_dual_output(raw_response)
+
+                # Use the full answer for display and history
+                assistant_msg = full_answer
                 messages.append(AIMessage(content=assistant_msg))
                 turn_counter += 1
 
-                # Save the conversation turn to memory
+                # Save the conversation turn to memory with extracted summary and content
                 if self.session_id and self.memory_manager and not summary:
-                    self._save_conversation_turn(original_user_input, assistant_msg, turn_counter)
+                    self._save_conversation_turn(
+                        original_user_input,
+                        assistant_msg,
+                        turn_counter,
+                        summary=summary_text,
+                        content=full_answer
+                    )
+
+                # Clear status bar
+                self.output_formatter.clear_status_bar()
 
                 # Display token usage statistics after each turn
                 self._print_token_stats(messages, max_tokens)

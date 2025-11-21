@@ -21,10 +21,11 @@
 - **交互式查询**：提供 ChromaDB 交互式查询工具
 - **元数据丰富**：自动提取并存储分类、主题、编程语言等标签
 
-### ⏱️ 请求超时控制
-- **智能超时**：默认 300 秒超时，可通过 `--timeout` 参数调整
-- **网络友好**：避免因网络延迟导致的请求失败
-- **长对话支持**：大上下文对话不会因超时而中断
+### 💾 会话记忆管理
+- **持久化记忆**：基于 ChromaDB 的会话记忆存储
+- **语义检索**：自动检索相关历史对话
+- **跨会话支持**：支持多个独立会话的并行管理
+- **智能回顾**：自动整合相关历史上下文到当前对话
 
 ## 📁 项目结构
 
@@ -60,7 +61,19 @@ ai_agent/
 
 ## 🛠️ 环境准备
 
-### 1. 安装依赖
+### 1. 创建并激活 Python 虚拟环境
+```bash
+# 创建虚拟环境
+python -m venv .venv
+
+# 激活虚拟环境 (Linux/macOS)
+source .venv/bin/activate
+
+# 激活虚拟环境 (Windows)
+# .venv\Scripts\activate
+```
+
+### 2. 安装依赖
 ```bash
 cd ai_agent
 pip install -r requirements.txt
@@ -151,6 +164,26 @@ python src/main.py --timeout 600
 python src/main.py --use-rag --timeout 600 --enable-compression
 ```
 
+#### 会话记忆管理
+
+```bash
+# 启用会话记忆（需要 ChromaDB 运行）
+python src/main.py --session-id "my-session-001"
+
+# 指定记忆集合名称（默认：agent_memory）
+python src/main.py --session-id "my-session-001" --memory-collection "my_memory"
+
+# 设置检索记忆数量（默认：5）
+python src/main.py --session-id "my-session-001" --memory-k 10
+
+# 组合使用：RAG + 压缩 + 记忆
+python src/main.py --use-rag --enable-compression --session-id "dev-session" --timeout 600
+
+# 使用不同的会话 ID 创建独立对话
+python src/main.py --session-id "session-A"
+python src/main.py --session-id "session-B"
+```
+
 ---
 
 ## 📊 命令行参数详解
@@ -180,6 +213,11 @@ python src/main.py --use-rag --timeout 600 --enable-compression
 - `--enable-compression`: 启用上下文自动压缩
 - `--disable-compression`: 禁用上下文压缩
 - `--max-tokens`: 上下文压缩后的最大 token 数 (默认: `80000`)
+
+### 记忆参数
+- `--session-id`: 启用会话记忆并指定会话 ID
+- `--memory-collection`: 指定记忆存储集合名称 (默认: `agent_memory`)
+- `--memory-k`: 检索记忆的数量 (默认: `5`)
 
 ## 🔧 工具使用
 
@@ -262,7 +300,14 @@ docker compose down
 
 ## 📝 更新日志
 
-### v2.8 - 2025-11-11 - 🧹 项目清理版
+### v0.3 - 2025-11-21 - 💾 会话记忆版
+- ✨ **会话记忆管理**：基于 ChromaDB 的持久化对话记忆
+- 🔍 **语义检索**：自动检索相关历史对话内容
+- 🎯 **多会话支持**：支持多个独立会话的并行管理
+- ⚡ **智能整合**：自动将相关记忆整合到当前对话上下文
+- 🔧 **配置灵活**：支持--show-thinking/--hide-thinking命令行参数
+
+### v0.2.8 - 2025-11-11 - 🧹 项目清理版
 - 🧹 **项目清理**：删除冗余文件和空目录
 - ✅ **代码优化**：修复请求超时问题，添加 `--timeout` 参数
 - 🔧 **模块导入**：修复 `src/main.py` 模块导入问题
@@ -273,18 +318,21 @@ docker compose down
   - 删除空目录 `scripts/` 和 `chroma_data/`
   - 清理 VS Code 配置（移除失效配置）
 
-### v2.7 - 2025-11-11 - 🎊 重构版本
+### v0.2.7 - 2025-11-11 - 🎊 重构版本
 - ✨ **重大重构**：模块化设计，17 个新模块
 - ✨ **流式输出优化**：实时显示 thinking 和 answers
 - ✨ **思考可见**：`[thinking]` 和 `[answers]` 标签展示
 - ✨ **Token 统计增强**：实时显示使用量和百分比
 - 🔧 **代码组织**：职责分离，代码复用率提升
 
-### v2.0 - v2.6 - 早期版本
+### v.0.2
 - ✨ **RAG 检索增强**：ChromaDB 向量检索
 - ✨ **上下文压缩**：智能压缩长对话
 - ✨ **流式输出**：实时响应显示
 - ✨ **文档分类**：自动分类入库
+
+### v.0.1
+- ✨ **AI聊天助手**：单轮or持续对话，上下文理解
 
 ## 📄 许可证
 
@@ -297,5 +345,5 @@ docker compose down
 ---
 
 **项目状态**：✅ 活跃维护中
-**最后更新**：2025-11-11
-**版本**：v2.8 (清理版)
+**最后更新**：2025-11-21
+**版本**：v0.3 (会话记忆版)
