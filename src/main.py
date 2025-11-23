@@ -1,7 +1,15 @@
 """Main entry point for the LLM agent."""
 
 import sys
+import os
 from pathlib import Path
+
+# 重要：在导入任何 Hugging Face 相关库之前设置环境变量
+# 设置 Hugging Face 镜像源（解决网络问题）
+HF_ENDPOINT = os.getenv('HF_ENDPOINT') or 'https://hf-mirror.com'
+os.environ['HF_ENDPOINT'] = HF_ENDPOINT
+os.environ['HF_HOME'] = os.path.expanduser('~/.cache/huggingface')
+os.environ['HF_HUB_DOWNLOAD_TIMEOUT'] = '300'
 
 # Add src directory to Python path
 src_path = Path(__file__).parent
