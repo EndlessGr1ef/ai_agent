@@ -7,7 +7,7 @@ import os
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="LangChain OpenAI-compatible agent with optional RAG (Chroma)"
+        description="LLM agent with optional RAG (Chroma) - Supports OpenAI-compatible and Anthropic SDK"
     )
     parser.add_argument(
         "-s",
@@ -27,21 +27,27 @@ def parse_args() -> argparse.Namespace:
         "-u",
         "--base-url",
         type=str,
-        default=os.getenv("OPENAI_BASE_URL", "https://api.minimax.io/v1"),
-        help="Custom OpenAI-compatible API base_url (default from env OPENAI_BASE_URL)",
+        default=os.getenv("OPENAI_BASE_URL", os.getenv("ANTHROPIC_BASE_URL", "https://api.minimaxi.com/anthropic")),
+        help="Custom API base_url (default from env OPENAI_BASE_URL or ANTHROPIC_BASE_URL)",
     )
     parser.add_argument(
         "-t",
         "--temperature",
         type=float,
-        default=float(os.getenv("OPENAI_TEMPERATURE", "0.5")),
-        help="Sampling temperature (default from env OPENAI_TEMPERATURE or 0.5)",
+        default=float(os.getenv("OPENAI_TEMPERATURE", os.getenv("ANTHROPIC_TEMPERATURE", "1.0"))),
+        help="Sampling temperature (default from env OPENAI_TEMPERATURE or ANTHROPIC_TEMPERATURE or 1.0)",
     )
     parser.add_argument(
         "--timeout",
         type=int,
         default=int(os.getenv("REQUEST_TIMEOUT", "300")),
         help="Request timeout in seconds (default from env REQUEST_TIMEOUT or 300)",
+    )
+    parser.add_argument(
+        "--use-anthropic",
+        action="store_true",
+        default=os.getenv("USE_ANTHROPIC", "false").lower() == "true",
+        help="Use Anthropic SDK instead of OpenAI-compatible interface (default from env USE_ANTHROPIC or false)",
     )
     # RAG options
     parser.add_argument(

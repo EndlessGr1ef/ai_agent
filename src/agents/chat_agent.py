@@ -2,8 +2,9 @@
 
 import re
 import json
+import anthropic
 
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
@@ -18,19 +19,20 @@ class ChatAgent(BaseAgent):
 
     def __init__(
         self,
-        llm: ChatOpenAI,
+        llm: Union[ChatOpenAI, anthropic.Anthropic],
         system_prompt: str = None,  # Default to dual output prompt
         compressor=None,
         enable_compression: bool = False,
         session_id: Optional[str] = None,
         memory_manager=None,
         memory_k: int = 5,
-        use_dual_output: bool = True  # New parameter to control dual output
+        use_dual_output: bool = True,  # New parameter to control dual output
+        use_anthropic_sdk: bool = False
     ):
         """Initialize the chat agent.
 
         Args:
-            llm: The language model to use
+            llm: The language model to use (ChatOpenAI or Anthropic client)
             system_prompt: The system prompt to use (defaults to dual output if use_dual_output=True)
             compressor: The context compressor instance
             enable_compression: Whether to enable context compression
@@ -38,6 +40,7 @@ class ChatAgent(BaseAgent):
             memory_manager: Optional MemoryManager instance
             memory_k: Number of memories to retrieve (default: 5)
             use_dual_output: Whether to use dual output prompt for summary extraction (default: True)
+            use_anthropic_sdk: Whether to use Anthropic SDK
         """
         # Use dual output prompt by default if not specified
         if system_prompt is None and use_dual_output:
@@ -45,7 +48,16 @@ class ChatAgent(BaseAgent):
         elif system_prompt is None:
             system_prompt = "You are a helpful assistant."
 
-        super().__init__(llm, system_prompt, compressor, enable_compression, session_id, memory_manager, memory_k)
+        super().__init__(
+            llm,
+            system_prompt,
+            compressor,
+            enable_compression,
+            session_id,
+            memory_manager,
+            memory_k,
+            use_anthropic_sdk
+        )
         # Initialize tool registry and register built-in tools
         self.tool_registry = ToolRegistry()
         self.tool_registry.register(build_markdown_create_tool())

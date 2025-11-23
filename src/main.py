@@ -21,14 +21,32 @@ def main() -> None:
     # Get API key
     api_key = require_api_key()
 
+    # Determine if we should use Anthropic SDK
+    use_anthropic = args.use_anthropic or "anthropic" in args.base_url
+
     # Build LLM
-    llm = build_llm(
-        api_key=api_key,
-        base_url=args.base_url,
-        model=args.model,
-        temperature=args.temperature,
-        timeout=args.timeout,
-    )
+    if use_anthropic:
+        # Use build_llm with use_anthropic flag
+        llm = build_llm(
+            api_key=api_key,
+            base_url=args.base_url,
+            model=args.model,
+            temperature=args.temperature,
+            timeout=args.timeout,
+            use_anthropic=True
+        )
+        print(f"✓ Using Anthropic SDK")
+    else:
+        # Use OpenAI-compatible interface
+        llm = build_llm(
+            api_key=api_key,
+            base_url=args.base_url,
+            model=args.model,
+            temperature=args.temperature,
+            timeout=args.timeout,
+            use_anthropic=False
+        )
+        print(f"✓ Using OpenAI-compatible interface")
 
     # Initialize context compressor
     compressor = None
@@ -128,7 +146,8 @@ def main() -> None:
             session_id=args.session_id,
             memory_manager=memory_manager,
             memory_k=args.memory_k,
-            use_dual_output=use_dual_output
+            use_dual_output=use_dual_output,
+            use_anthropic_sdk=use_anthropic
         )
         agent.output_formatter.show_thinking = show_thinking
         agent.run()
@@ -143,7 +162,8 @@ def main() -> None:
             session_id=args.session_id,
             memory_manager=memory_manager,
             memory_k=args.memory_k,
-            use_dual_output=use_dual_output
+            use_dual_output=use_dual_output,
+            use_anthropic_sdk=use_anthropic
         )
         agent.output_formatter.show_thinking = show_thinking
         agent.run()

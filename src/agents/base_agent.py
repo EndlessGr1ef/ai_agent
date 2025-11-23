@@ -1,8 +1,9 @@
 """Base agent class with common functionality."""
 
 from abc import ABC, abstractmethod
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 import re
+import anthropic
 
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
@@ -40,24 +41,26 @@ class BaseAgent(ABC):
 
     def __init__(
         self,
-        llm: ChatOpenAI,
+        llm: Union[ChatOpenAI, anthropic.Anthropic],
         system_prompt: str = "You are a helpful assistant for software development.",
         compressor=None,
         enable_compression: bool = False,
         session_id: Optional[str] = None,
         memory_manager=None,
-        memory_k: int = 5
+        memory_k: int = 5,
+        use_anthropic_sdk: bool = False
     ):
         """Initialize the base agent.
 
         Args:
-            llm: The language model to use
+            llm: The language model to use (ChatOpenAI or Anthropic client)
             system_prompt: The system prompt to use
             compressor: The context compressor instance
             enable_compression: Whether to enable context compression
             session_id: Optional session ID for memory persistence
             memory_manager: Optional MemoryManager instance
             memory_k: Number of memories to retrieve (default: 5)
+            use_anthropic_sdk: Whether the llm is an Anthropic client
         """
         self.llm = llm
         self.system_prompt = system_prompt
@@ -66,6 +69,7 @@ class BaseAgent(ABC):
         self.session_id = session_id
         self.memory_manager = memory_manager
         self.memory_k = memory_k
+        self.use_anthropic_sdk = use_anthropic_sdk or isinstance(llm, anthropic.Anthropic)
         self.stream_processor = StreamProcessor()
         self.output_formatter = OutputFormatter()
 
@@ -210,13 +214,15 @@ class BaseAgent(ABC):
     def _process_streaming(
         self,
         messages: List,
-        max_tokens: int = 80000
+        max_tokens: int = 80000,
+        temperature: float = 1.0
     ) -> str:
         """Process streaming response and extract complete content.
 
         Args:
-            messages: List of messages to send
+            messages: List of messages to send (LangChain format for OpenAI, Anthropic format for Anthropic)
             max_tokens: Maximum token limit for display
+            temperature: Sampling temperature
 
         Returns:
             The complete assistant response
@@ -228,21 +234,98 @@ class BaseAgent(ABC):
         full_response = []
         show_timer = True  # Always show timer during streaming
 
-        for chunk in self.llm.stream(messages):
-            if chunk.content:
-                thinking_content, answer_content = self.stream_processor.process_chunk(chunk.content)
+        if self.use_anthropic_sdk:
+            # Use Anthropic SDK streaming
+            full_response = self._process_anthropic_streaming(messages, temperature)
+        else:
+            # Use OpenAI-compatible streaming (original implementation)
+            for chunk in self.llm.stream(messages):
+                if chunk.content:
+                    thinking_content, answer_content = self.stream_processor.process_chunk(chunk.content)
 
-                if thinking_content:
-                    self.output_formatter.print_thinking(thinking_content)
+                    if thinking_content:
+                        self.output_formatter.print_thinking(thinking_content)
 
-                if answer_content:
-                    self.output_formatter.print_answer(answer_content)
-                    full_response.append(answer_content)
+                    if answer_content:
+                        self.output_formatter.print_answer(answer_content)
+                        full_response.append(answer_content)
 
         self.output_formatter.clear_status_bar()
         self.output_formatter.print_empty_line()
         self.output_formatter.print_call_duration()
         return "".join(full_response)
+
+    def _process_anthropic_streaming(
+        self,
+        messages: List,
+        temperature: float = 1.0
+    ) -> List[str]:
+        """Process streaming response using Anthropic SDK.
+
+        Args:
+            messages: List of messages in LangChain format
+            temperature: Sampling temperature
+
+        Returns:
+            List of response text chunks
+        """
+        import anthropic
+
+        # Convert LangChain messages to Anthropic format
+        anthropic_messages = []
+        system_prompt = self.system_prompt
+
+        for msg in messages:
+            if isinstance(msg, SystemMessage):
+                system_prompt = msg.content
+            elif isinstance(msg, HumanMessage):
+                anthropic_messages.append({
+                    "role": "user",
+                    "content": [{"type": "text", "text": msg.content}]
+                })
+            elif isinstance(msg, AIMessage):
+                anthropic_messages.append({
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": msg.content}]
+                })
+
+        full_response = []
+
+        # Create stream using Anthropic SDK
+        stream = self.llm.messages.create(
+            model="MiniMax-M2",
+            max_tokens=4000,
+            system=system_prompt,
+            messages=anthropic_messages,
+            temperature=temperature,
+            stream=True,
+        )
+
+        for chunk in stream:
+            if chunk.type == "content_block_delta":
+                if hasattr(chunk, "delta") and chunk.delta:
+                    if hasattr(chunk.delta, "type"):
+                        if chunk.delta.type == "thinking_delta":
+                            # Handle thinking content
+                            thinking_text = getattr(chunk.delta, 'thinking', '')
+                            if thinking_text:
+                                thinking_content, _ = self.stream_processor.process_chunk(f"<think>{thinking_text}</think>")
+                                if thinking_content:
+                                    self.output_formatter.print_thinking(thinking_content)
+                        elif chunk.delta.type == "text_delta":
+                            # Handle text content
+                            text_content = getattr(chunk.delta, 'text', '')
+                            if text_content:
+                                thinking_content, answer_content = self.stream_processor.process_chunk(text_content)
+
+                                if thinking_content:
+                                    self.output_formatter.print_thinking(thinking_content)
+
+                                if answer_content:
+                                    self.output_formatter.print_answer(answer_content)
+                                    full_response.append(answer_content)
+
+        return full_response
 
     def _handle_error(
         self,

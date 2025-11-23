@@ -1,7 +1,8 @@
 """RAG agent implementation."""
 
 import os
-from typing import List, Optional
+import anthropic
+from typing import List, Optional, Union
 
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
@@ -14,7 +15,7 @@ class RagAgent(BaseAgent):
 
     def __init__(
         self,
-        llm: ChatOpenAI,
+        llm: Union[ChatOpenAI, anthropic.Anthropic],
         retriever,
         system_prompt: str = None,  # Default to dual output prompt
         compressor=None,
@@ -22,12 +23,13 @@ class RagAgent(BaseAgent):
         session_id: Optional[str] = None,
         memory_manager=None,
         memory_k: int = 5,
-        use_dual_output: bool = True  # New parameter to control dual output
+        use_dual_output: bool = True,  # New parameter to control dual output
+        use_anthropic_sdk: bool = False
     ):
         """Initialize the RAG agent.
 
         Args:
-            llm: The language model to use
+            llm: The language model to use (ChatOpenAI or Anthropic client)
             retriever: The retriever to use for document retrieval
             system_prompt: The system prompt to use (defaults to dual output if use_dual_output=True)
             compressor: The context compressor instance
@@ -36,6 +38,7 @@ class RagAgent(BaseAgent):
             memory_manager: Optional MemoryManager instance
             memory_k: Number of memories to retrieve (default: 5)
             use_dual_output: Whether to use dual output prompt for summary extraction (default: True)
+            use_anthropic_sdk: Whether to use Anthropic SDK
         """
         # Use dual output prompt by default if not specified
         if system_prompt is None and use_dual_output:
@@ -43,7 +46,16 @@ class RagAgent(BaseAgent):
         elif system_prompt is None:
             system_prompt = "You are a helpful assistant."
 
-        super().__init__(llm, system_prompt, compressor, enable_compression, session_id, memory_manager, memory_k)
+        super().__init__(
+            llm,
+            system_prompt,
+            compressor,
+            enable_compression,
+            session_id,
+            memory_manager,
+            memory_k,
+            use_anthropic_sdk
+        )
         self.retriever = retriever
         self.use_dual_output = use_dual_output
 
