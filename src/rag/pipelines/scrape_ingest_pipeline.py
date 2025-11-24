@@ -1,6 +1,7 @@
 """End-to-end pipeline for scraping PRTS Wiki and ingesting to ChromaDB."""
 
 import os
+import sys
 import asyncio
 import logging
 from pathlib import Path
@@ -502,10 +503,17 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    # Setup logging
+    # Setup logging with UTF-8 encoding support
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
+    
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler('scraping_pipeline.log', encoding='utf-8')
+        ]
     )
     
     # Run pipeline

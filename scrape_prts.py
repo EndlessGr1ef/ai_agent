@@ -65,14 +65,18 @@ Examples:
     
     args = parser.parse_args()
     
-    # Setup logging
+    # Setup logging with UTF-8 encoding support
     log_level = logging.DEBUG if args.verbose else logging.INFO
+    # Configure stdout with UTF-8 encoding
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
+    
     logging.basicConfig(
         level=log_level,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
             logging.StreamHandler(sys.stdout),
-            logging.FileHandler('scraping.log')
+            logging.FileHandler('scraping.log', encoding='utf-8')
         ]
     )
     
