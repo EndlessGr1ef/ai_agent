@@ -22,7 +22,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 class RetrievalConfig:
     """Configuration for enhanced retrieval."""
     # Embedding settings
-    embedding_model: str = "BAAI/bge-large-en-v1.5"  # Better for technical content
+    embedding_model: str = os.getenv('EMBED_MODEL_NAME', 'BAAI/bge-large-zh-v1.5')  # 默认使用中文优化模型
     
     # Retrieval parameters
     initial_k: int = 8  # Retrieve more documents initially

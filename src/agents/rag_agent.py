@@ -1,4 +1,4 @@
-"""RAG agent implementation with enhanced retrieval capabilities."""
+"""RAG agent implementation with simplified enhanced retrieval."""
 
 import os
 import anthropic
@@ -9,17 +9,12 @@ from langchain_openai import ChatOpenAI
 
 from agents.base_agent import BaseAgent
 
-# Import enhanced retrieval components
-try:
-    from rag.enhanced_retrieval import (
-        EnhancedRAGRetriever, 
-        RetrievalConfig, 
-        build_enhanced_context
-    )
-    ENHANCED_RETRIEVAL_AVAILABLE = True
-except ImportError as e:
-    print(f"Warning: Enhanced retrieval not available: {e}")
-    ENHANCED_RETRIEVAL_AVAILABLE = False
+# Import enhanced retrieval components (required)
+from rag.enhanced_retrieval import (
+    EnhancedRAGRetriever, 
+    RetrievalConfig, 
+    build_enhanced_context
+)
 
 
 class RagAgent(BaseAgent):
@@ -69,15 +64,14 @@ class RagAgent(BaseAgent):
         memory_k: int = 5,
         use_dual_output: bool = True,  # New parameter to control dual output
         use_anthropic_sdk: bool = False,
-        # Enhanced retrieval parameters
-        use_enhanced_retrieval: bool = True,
+        # Simplified retrieval configuration
         retrieval_config: Optional[RetrievalConfig] = None
     ):
-        """Initialize the RAG agent.
+        """Initialize the RAG agent with enhanced retrieval only.
 
         Args:
             llm: The language model to use (ChatOpenAI or Anthropic client)
-            retriever: The retriever to use for document retrieval
+            retriever: The base retriever to use (will be wrapped with EnhancedRAGRetriever)
             system_prompt: The system prompt to use (defaults to dual output if use_dual_output=True)
             compressor: The context compressor instance
             enable_compression: Whether to enable context compression
@@ -86,7 +80,6 @@ class RagAgent(BaseAgent):
             memory_k: Number of memories to retrieve (default: 5)
             use_dual_output: Whether to use dual output prompt for summary extraction (default: True)
             use_anthropic_sdk: Whether to use Anthropic SDK
-            use_enhanced_retrieval: Whether to use enhanced retrieval with query processing and reranking
             retrieval_config: Configuration for enhanced retrieval system
         """
         # Get system prompt from environment variable or use default
@@ -110,20 +103,12 @@ class RagAgent(BaseAgent):
             use_anthropic_sdk
         )
         
-        # Setup retrieval system
-        self.use_enhanced_retrieval = use_enhanced_retrieval and ENHANCED_RETRIEVAL_AVAILABLE
-        
-        if self.use_enhanced_retrieval:
-            self.retrieval_config = retrieval_config or RetrievalConfig()
-            self.enhanced_retriever = EnhancedRAGRetriever(retriever, self.retrieval_config)
-            self.retriever = self.enhanced_retriever
-            print("✓ Enhanced RAG retrieval system enabled")
-        else:
-            self.retriever = retriever
-            self.retrieval_config = None
-            self.enhanced_retriever = None
-            if use_enhanced_retrieval:
-                print("⚠️  Enhanced retrieval requested but not available, using basic retrieval")
+        # Setup enhanced retrieval system (always enabled)
+        self.use_enhanced_retrieval = True
+        self.retrieval_config = retrieval_config or RetrievalConfig()
+        self.enhanced_retriever = EnhancedRAGRetriever(retriever, self.retrieval_config)
+        self.retriever = self.enhanced_retriever
+        print("✓ Enhanced RAG retrieval system enabled")
         
         self.use_dual_output = use_dual_output
 
@@ -137,38 +122,23 @@ class RagAgent(BaseAgent):
             The built context string with enhanced formatting
         """
         try:
-            if self.use_enhanced_retrieval:
-                # Use enhanced retriever
-                retrieved = self.enhanced_retriever.retrieve(user_input)
-                
-                # Build enhanced context
-                context = build_enhanced_context(
-                    user_input, 
-                    retrieved, 
-                    max_length=self.retrieval_config.max_context_length
-                )
-                
-                # Add instructions for enhanced context
-                prompt_with_context = (
-                    f"{context}\n\n"
-                    f"Instructions: Provide a comprehensive answer based on the context above. "
-                    f"Reference specific sources when possible. "
-                    f"If information is insufficient, clearly state what's missing."
-                )
-            else:
-                # Fallback to basic retrieval
-                retrieved = self.retriever.invoke(user_input)
-                context_parts = []
-                for i, doc in enumerate(retrieved, 1):
-                    src = (doc.metadata or {}).get("source", "unknown")
-                    context_parts.append(f"[Chunk {i}] source: {src}\n{doc.page_content}")
-                context = "\n\n".join(context_parts)
-
-                prompt_with_context = (
-                    f"Question:\n{user_input}\n\nContext:\n{context}\n\n"
-                    f"Instructions: Answer based on the context above. "
-                    f"If not enough information, say you don't know."
-                )
+            # Always use enhanced retriever
+            retrieved = self.enhanced_retriever.retrieve(user_input)
+            
+            # Build enhanced context
+            context = build_enhanced_context(
+                user_input, 
+                retrieved, 
+                max_length=self.retrieval_config.max_context_length
+            )
+            
+            # Add instructions for enhanced context
+            prompt_with_context = (
+                f"{context}\n\n"
+                f"Instructions: Provide a comprehensive answer based on the context above. "
+                f"Reference specific sources when possible. "
+                f"If information is insufficient, clearly state what's missing."
+            )
                 
         except Exception as e:
             print(f"⚠️  Retrieval error: {e}")

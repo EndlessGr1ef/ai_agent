@@ -308,9 +308,16 @@ class ScrapePipeline:
                 'character_count': len(content_text) if content_text else 0,
             }
             
-            # Generate filename
-            title = data.get('title', f'page_{page_num}')
-            safe_title = self._sanitize_filename(title)
+            # Generate filename - prioritize name from URL path
+            url = data.get('url', '')
+            file_name = self._extract_character_name_from_url(url)  # This extracts the part after /w/
+            
+            # If URL extraction fails, fall back to title
+            if not file_name:
+                title = data.get('title', f'page_{page_num}')
+                file_name = title
+                
+            safe_title = self._sanitize_filename(file_name)
             filename = f"{safe_title}.md"
             file_path = self.output_dir / filename
             
@@ -377,9 +384,16 @@ class ScrapePipeline:
                         'metadata': data.get('metadata', {})
                     }
                 
-                # Generate filename
-                title = data.get('title', f'page_{i+1}')
-                safe_title = self._sanitize_filename(title)
+                # Generate filename - prioritize name from URL path
+                url = data.get('url', '')
+                file_name = self._extract_character_name_from_url(url)  # This extracts the part after /w/
+                
+                # If URL extraction fails, fall back to title
+                if not file_name:
+                    title = data.get('title', f'page_{i+1}')
+                    file_name = title
+                
+                safe_title = self._sanitize_filename(file_name)
                 filename = f"{safe_title}.md"
                 file_path = self.output_dir / filename
                 

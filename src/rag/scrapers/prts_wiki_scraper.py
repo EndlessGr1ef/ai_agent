@@ -914,10 +914,10 @@ class PRTSWikiScraper(BaseScraper):
                     
                     if page_links:
                         all_character_links.extend(page_links)
-                        logger.info(f"Found {len(page_links)} character links on page {current_page} "
-                                   f"(total: {len(all_character_links)})")
+                        # Reduced detail log
+                        logger.info(f"Page {current_page}: {len(page_links)} links found")
                     else:
-                        logger.info(f"No character links found on page {current_page}")
+                        logger.debug(f"No character links found on page {current_page}")
                     
                     # Check for next page
                     next_page_num = await self._find_next_page_number(soup)
@@ -1150,12 +1150,12 @@ class PRTSWikiScraper(BaseScraper):
                         available_pages.append(page_num)
             
             available_pages = sorted(set(available_pages))
-            logger.info(f"Current page: {current_page}, Available pages: {available_pages}")
+            logger.debug(f"Current page: {current_page}, Available pages: {available_pages}")
             
             # Find next page
             next_page = current_page + 1
             if next_page in available_pages:
-                logger.info(f"Next page available: {next_page}")
+                logger.debug(f"Next page available: {next_page}")
                 return next_page
             
         except Exception as e:
@@ -1194,7 +1194,7 @@ class PRTSWikiScraper(BaseScraper):
                 }
             ''')
             
-            logger.info(f"Attempting to navigate from page {before_page} to page {page_number}")
+            logger.debug(f"Attempting to navigate from page {before_page} to page {page_number}")
             
             # Use JavaScript to find and click the correct pagination element
             navigation_success = await page_obj.evaluate(f'''
@@ -1237,7 +1237,7 @@ class PRTSWikiScraper(BaseScraper):
                 logger.error(f"Could not click page {page_number}: {navigation_success.get('reason')}")
                 return False
             
-            logger.info(f"Clicked pagination element: {navigation_success}")
+            # Removed detailed click info log
             
             # Wait for content to change with multiple strategies
             max_wait_time = 10  # seconds
@@ -1264,7 +1264,8 @@ class PRTSWikiScraper(BaseScraper):
                 character_count = current_state.get('characterCount', 0)
                 
                 if current_page == page_number:
-                    logger.info(f"Successfully navigated to page {page_number} (characters: {character_count})")
+                    # Reduced detail log
+                    logger.info(f"✓ Page {page_number} loaded")
                     return True
                 elif current_page != before_page:
                     logger.warning(f"Navigation landed on page {current_page} instead of {page_number}")

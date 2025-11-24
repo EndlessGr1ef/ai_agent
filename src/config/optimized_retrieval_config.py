@@ -12,7 +12,7 @@ class OptimizedRetrievalConfig:
     # ========== Embedding Model Settings ==========
     # Use more powerful embedding model for better semantic understanding
     embedding_model: str = field(default_factory=lambda: os.getenv(
-        "OPTIMIZED_EMBED_MODEL", 
+        "EMBED_MODEL_NAME", 
         "BAAI/bge-large-zh-v1.5"  # Better for Chinese + English technical content
     ))
     
@@ -108,7 +108,7 @@ class OptimizedRetrievalConfig:
 # Predefined configurations for different scenarios
 PERFORMANCE_CONFIG = OptimizedRetrievalConfig(
     # Fast retrieval with basic quality
-    embedding_model="sentence-transformers/all-MiniLM-L6-v2",
+    embedding_model=os.getenv("EMBED_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2"),
     initial_retrieval_k=6,
     final_result_k=4,
     enable_reranking=False,
@@ -118,7 +118,7 @@ PERFORMANCE_CONFIG = OptimizedRetrievalConfig(
 
 QUALITY_CONFIG = OptimizedRetrievalConfig(
     # High quality with advanced features
-    embedding_model="BAAI/bge-large-zh-v1.5",
+    embedding_model=os.getenv("EMBED_MODEL_NAME", "BAAI/bge-large-zh-v1.5"),
     initial_retrieval_k=15,
     final_result_k=8,
     enable_reranking=True,
@@ -130,7 +130,7 @@ QUALITY_CONFIG = OptimizedRetrievalConfig(
 
 BALANCED_CONFIG = OptimizedRetrievalConfig(
     # Balanced performance and quality (default)
-    embedding_model="BAAI/bge-large-zh-v1.5",
+    embedding_model=os.getenv("EMBED_MODEL_NAME", "BAAI/bge-large-zh-v1.5"),
     initial_retrieval_k=10,
     final_result_k=6,
     enable_reranking=True,
@@ -181,8 +181,8 @@ def load_config_from_env() -> OptimizedRetrievalConfig:
     base_config = get_config_by_name(config_name)
     
     # Override with environment variables if present
-    if os.getenv("RAG_EMBEDDING_MODEL"):
-        base_config.embedding_model = os.getenv("RAG_EMBEDDING_MODEL")
+    if os.getenv("EMBED_MODEL_NAME"):
+        base_config.embedding_model = os.getenv("EMBED_MODEL_NAME")
     
     if os.getenv("RAG_INITIAL_K"):
         base_config.initial_retrieval_k = int(os.getenv("RAG_INITIAL_K"))

@@ -92,6 +92,9 @@ OPENAI_API_KEY=your_api_key
 OPENAI_MODEL=MiniMax-M2
 OPENAI_BASE_URL=https://api.minimax.io/v1
 OPENAI_SYSTEM_PROMPT=You are a helpful assistant for software development.
+
+# 嵌入模型配置（新增）
+EMBED_MODEL_NAME=BAAI/bge-large-zh-v1.5
 ```
 
 ## 🚀 使用说明
@@ -179,7 +182,6 @@ python src/main.py --use-rag --enable-compression --session-id "dev-session" --t
 
 # 使用不同的会话 ID 创建独立对话
 python src/main.py --session-id "session-A"
-python src/main.py --session-id "session-B"
 ```
 
 ---
@@ -199,7 +201,7 @@ python src/main.py --session-id "session-B"
 - `--chroma-host`: ChromaDB 服务器地址 (默认: `localhost`)
 - `--chroma-port`: ChromaDB 服务器端口 (默认: `9000`)
 - `--top-k`: 检索文档数量 (默认: `4`)
-- `--embed-model`: 嵌入模型名称 (默认: `sentence-transformers/all-MiniLM-L6-v2`)
+- `--embed-model`: 嵌入模型名称 (默认: `BAAI/bge-large-zh-v1.5`)，优先使用环境变量`EMBED_MODEL_NAME`
 
 ### 过滤参数 (仅用于 RAG 模式)
 - `--category`: 按类别过滤 (如: 'AI/RAG', 'Backend', 'Frontend')
@@ -298,7 +300,11 @@ docker compose down
 
 ## 📝 更新日志
 
-### v0.3 - 2025-11-21 - 💾 会话记忆版
+### v0.3.1 - 2025-11-22 - 🔧 RAG优化
+- ✨ **嵌入模型统一**：所有嵌入模型配置统一使用环境变量`EMBED_MODEL_NAME`控制
+- ✨ **默认模型更新**：默认嵌入模型从`sentence-transformers/all-MiniLM-L6-v2`更新为`BAAI/bge-large-zh-v1.5`，提升中文理解能力
+
+### v0.3 - 2025-11-21 - 💾 会话记忆
 - ✨ **会话记忆管理**：基于 ChromaDB 的持久化对话记忆
 - 🔍 **语义检索**：自动检索相关历史对话内容
 - 🎯 **多会话支持**：支持多个独立会话的并行管理
@@ -343,5 +349,5 @@ docker compose down
 ---
 
 **项目状态**：✅ 活跃维护中
-**最后更新**：2025-11-21
-**版本**：v0.3 (会话记忆版)
+**最后更新**：2025-11-24
+**版本**：v0.3.1 (配置优化版)

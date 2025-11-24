@@ -64,17 +64,20 @@ def build_optimized_embeddings(config_profile: str = "balanced") -> HuggingFaceE
     Returns:
         Configured embeddings instance
     """
+    # 从环境变量获取模型，如果没有则使用默认值
+    env_model_name = os.getenv("EMBED_MODEL_NAME", "BAAI/bge-large-zh-v1.5")
+    
     profiles = {
         "performance": {
-            "model_name": "sentence-transformers/all-MiniLM-L6-v2",  # Fast, smaller model
+            "model_name": env_model_name if env_model_name else "sentence-transformers/all-MiniLM-L6-v2",  # Fast, smaller model
             "encode_kwargs": {"batch_size": 64, "normalize_embeddings": True}
         },
         "quality": {
-            "model_name": "BAAI/bge-large-zh-v1.5",  # High quality multilingual
+            "model_name": env_model_name,  # High quality multilingual
             "encode_kwargs": {"batch_size": 16, "normalize_embeddings": True}
         },
         "balanced": {
-            "model_name": "BAAI/bge-base-zh-v1.5",  # Good balance
+            "model_name": env_model_name,  # Good balance
             "encode_kwargs": {"batch_size": 32, "normalize_embeddings": True}
         }
     }
@@ -95,5 +98,15 @@ EMBEDDING_MODELS = {
 
 
 def get_recommended_model(use_case: str = "chinese_technical") -> str:
-    """Get recommended embedding model for specific use case."""
+    """Get recommended embedding model for specific use case.
+    
+    If EMBED_MODEL_NAME environment variable is set, it takes precedence.
+    Otherwise, returns model based on the specified use case.
+    """
+    # 环境变量优先
+    env_model = os.getenv("EMBED_MODEL_NAME")
+    if env_model:
+        return env_model
+    
+    # 否则返回基于用例的推荐模型
     return EMBEDDING_MODELS.get(use_case, EMBEDDING_MODELS["chinese_technical"])

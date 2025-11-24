@@ -55,7 +55,7 @@ class ScraperConfig:
             chroma_host=os.getenv('CHROMA_HOST', 'localhost'),
             chroma_port=int(os.getenv('CHROMA_PORT', '9000')),
             collection_name=os.getenv('CHROMA_COLLECTION', 'scraped_content'),
-            embedding_model=os.getenv('EMBED_MODEL_NAME', 'sentence-transformers/all-MiniLM-L6-v2'),
+            embedding_model=os.getenv('EMBED_MODEL_NAME', 'BAAI/bge-large-zh-v1.5'),
             chunk_size=int(os.getenv('CHUNK_SIZE', '1000')),
             chunk_overlap=int(os.getenv('CHUNK_OVERLAP', '200')),
         )

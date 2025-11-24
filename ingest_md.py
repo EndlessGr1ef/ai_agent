@@ -20,6 +20,10 @@ from langchain_chroma import Chroma
 import chromadb
 from chromadb.config import Settings
 
+# 导入我们统一的嵌入模型配置
+from src.config.embeddings import build_embeddings
+from src.config.llm_config import create_chroma_client
+
 
 def smart_chunk_arknights_docs(docs, chunk_size: int, chunk_overlap: int):
     """为明日方舟文档优化的智能分块策略"""
@@ -90,22 +94,7 @@ def _extract_operator_class(content_lower: str) -> str:
     return "未知"
 
 
-def build_embeddings(model_name: str | None = None) -> HuggingFaceEmbeddings:
-    if not model_name:
-        # 优先选择中文优化模型，回退到通用模型
-        model_name = os.getenv("EMBED_MODEL_NAME", "BAAI/bge-large-zh-v1.5")
-    
-    print(f"📊 使用嵌入模型: {model_name}")
-    return HuggingFaceEmbeddings(
-        model_name=model_name,
-        model_kwargs={'device': 'cpu'},  # 可根据需要改为'cuda'
-        encode_kwargs={'normalize_embeddings': True}  # 正则化嵌入向量
-    )
-
-
-def create_chroma_client(host: str, port: int) -> chromadb.HttpClient:
-    settings = Settings(allow_reset=True, anonymized_telemetry=False)
-    return chromadb.HttpClient(host=host, port=port, settings=settings)
+# 移除本地定义的build_embeddings和create_chroma_client函数，使用统一的导入版本
 
 
 def classify_by_path(file_path: str) -> Dict[str, str]:
@@ -469,7 +458,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--collection", type=str, default=os.getenv("CHROMA_COLLECTION", "md_docs"), help="Chroma collection name")
     parser.add_argument("--chroma-host", type=str, default=os.getenv("CHROMA_HOST", "localhost"), help="Chroma server host")
     parser.add_argument("--chroma-port", type=int, default=int(os.getenv("CHROMA_PORT", "9000")), help="Chroma server port")
-    parser.add_argument("--embed-model", type=str, default=os.getenv("EMBED_MODEL_NAME", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"), help="Embedding model name")
+    parser.add_argument("--embed-model", type=str, default=os.getenv("EMBED_MODEL_NAME", "BAAI/bge-large-zh-v1.5"), help="Embedding model name")
     parser.add_argument("--chunk-size", type=int, default=1500, help="Chunk size for splitting")
     parser.add_argument("--chunk-overlap", type=int, default=300, help="Chunk overlap for splitting")
     parser.add_argument("--disable-smart-chunking", action="store_true", help="Disable smart chunking for Arknights content")

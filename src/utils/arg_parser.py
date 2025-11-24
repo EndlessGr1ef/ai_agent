@@ -83,7 +83,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--embed-model",
         type=str,
-        default=os.getenv("EMBED_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2"),
+        default=os.getenv("EMBED_MODEL_NAME", "BAAI/bge-large-zh-v1.5"),
         help="Embedding model name"
     )
 
