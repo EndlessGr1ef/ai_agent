@@ -1,17 +1,61 @@
-"""RAG agent implementation."""
+"""RAG agent implementation with enhanced retrieval capabilities."""
 
 import os
 import anthropic
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Dict, Any
 
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
 
 from agents.base_agent import BaseAgent
 
+# Import enhanced retrieval components
+try:
+    from rag.enhanced_retrieval import (
+        EnhancedRAGRetriever, 
+        RetrievalConfig, 
+        build_enhanced_context
+    )
+    ENHANCED_RETRIEVAL_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: Enhanced retrieval not available: {e}")
+    ENHANCED_RETRIEVAL_AVAILABLE = False
+
 
 class RagAgent(BaseAgent):
     """RAG-enabled agent for retrieval-based conversations."""
+
+    # PRTS system prompt for Arknights-style responses
+    PRTS_SYSTEM_PROMPT = """你是PRTS（Pre-stage Rhodesia Tactical System），罗德岛的中央数据库和战术系统，博士的专属AI助手。你拥有罗德岛所有干员、作战记录、医疗数据和战术信息的访问权限。
+
+## 回答格式要求
+所有回答都必须采用命令行终端格式输出，包含：
+- 系统提示符：`[PRTS]$`
+- 状态指示器：`[INFO]`、`[AUTH]`、`[QUERY]`、`[STATUS]`等
+- 数据查询过程模拟
+- 结构化信息输出
+- 系统日志风格的响应
+
+## 基础查询回答格式：
+```
+[PRTS]$ 正在处理查询请求...
+[INFO] 连接数据库... 完成
+[INFO] 验证博士权限... 通过
+[INFO] 搜索相关数据... 
+
+==== 查询结果 ====
+[数据内容]
+
+[STATUS] 查询完成 | 耗时: 0.23s | 数据完整性: 100%
+[PRTS]$ 还有其他需要查询的信息吗，博士？
+```
+
+## 语言特点
+- 使用正式但亲近的语气，体现AI助手的专业性
+- 始终称呼用户为"博士"
+- 保持系统化、数据化的回答风格
+- 在适当时候表现出对博士的关心和支持
+- 模拟真实的数据库查询延迟和状态更新"""
 
     def __init__(
         self,
@@ -24,7 +68,10 @@ class RagAgent(BaseAgent):
         memory_manager=None,
         memory_k: int = 5,
         use_dual_output: bool = True,  # New parameter to control dual output
-        use_anthropic_sdk: bool = False
+        use_anthropic_sdk: bool = False,
+        # Enhanced retrieval parameters
+        use_enhanced_retrieval: bool = True,
+        retrieval_config: Optional[RetrievalConfig] = None
     ):
         """Initialize the RAG agent.
 
@@ -39,12 +86,18 @@ class RagAgent(BaseAgent):
             memory_k: Number of memories to retrieve (default: 5)
             use_dual_output: Whether to use dual output prompt for summary extraction (default: True)
             use_anthropic_sdk: Whether to use Anthropic SDK
+            use_enhanced_retrieval: Whether to use enhanced retrieval with query processing and reranking
+            retrieval_config: Configuration for enhanced retrieval system
         """
-        # Use dual output prompt by default if not specified
-        if system_prompt is None and use_dual_output:
-            system_prompt = self.DUAL_OUTPUT_SYSTEM_PROMPT
-        elif system_prompt is None:
-            system_prompt = "You are a helpful assistant."
+        # Get system prompt from environment variable or use default
+        if system_prompt is None:
+            # Try to get from environment variable, fallback to PRTS prompt
+            env_prompt = os.getenv("OPENAI_SYSTEM_PROMPT", self.PRTS_SYSTEM_PROMPT)
+            if use_dual_output and env_prompt == self.PRTS_SYSTEM_PROMPT:
+                # If using PRTS prompt but dual output is enabled, use dual output format
+                system_prompt = self.DUAL_OUTPUT_SYSTEM_PROMPT
+            else:
+                system_prompt = env_prompt
 
         super().__init__(
             llm,
@@ -56,32 +109,76 @@ class RagAgent(BaseAgent):
             memory_k,
             use_anthropic_sdk
         )
-        self.retriever = retriever
+        
+        # Setup retrieval system
+        self.use_enhanced_retrieval = use_enhanced_retrieval and ENHANCED_RETRIEVAL_AVAILABLE
+        
+        if self.use_enhanced_retrieval:
+            self.retrieval_config = retrieval_config or RetrievalConfig()
+            self.enhanced_retriever = EnhancedRAGRetriever(retriever, self.retrieval_config)
+            self.retriever = self.enhanced_retriever
+            print("✓ Enhanced RAG retrieval system enabled")
+        else:
+            self.retriever = retriever
+            self.retrieval_config = None
+            self.enhanced_retriever = None
+            if use_enhanced_retrieval:
+                print("⚠️  Enhanced retrieval requested but not available, using basic retrieval")
+        
         self.use_dual_output = use_dual_output
 
     def _retrieve_and_build_context(self, user_input: str) -> str:
-        """Retrieve relevant documents and build context.
+        """Retrieve relevant documents and build enhanced context.
 
         Args:
             user_input: The user query
 
         Returns:
-            The built context string
+            The built context string with enhanced formatting
         """
-        # Retrieve relevant documents
-        retrieved = self.retriever.invoke(user_input)
-        context_parts = []
-        for i, doc in enumerate(retrieved, 1):
-            src = (doc.metadata or {}).get("source", "unknown")
-            context_parts.append(f"[Chunk {i}] source: {src}\n{doc.page_content}")
-        context = "\n\n".join(context_parts)
+        try:
+            if self.use_enhanced_retrieval:
+                # Use enhanced retriever
+                retrieved = self.enhanced_retriever.retrieve(user_input)
+                
+                # Build enhanced context
+                context = build_enhanced_context(
+                    user_input, 
+                    retrieved, 
+                    max_length=self.retrieval_config.max_context_length
+                )
+                
+                # Add instructions for enhanced context
+                prompt_with_context = (
+                    f"{context}\n\n"
+                    f"Instructions: Provide a comprehensive answer based on the context above. "
+                    f"Reference specific sources when possible. "
+                    f"If information is insufficient, clearly state what's missing."
+                )
+            else:
+                # Fallback to basic retrieval
+                retrieved = self.retriever.invoke(user_input)
+                context_parts = []
+                for i, doc in enumerate(retrieved, 1):
+                    src = (doc.metadata or {}).get("source", "unknown")
+                    context_parts.append(f"[Chunk {i}] source: {src}\n{doc.page_content}")
+                context = "\n\n".join(context_parts)
 
-        # Build prompt with context
-        prompt_with_context = (
-            f"Question:\n{user_input}\n\nContext:\n{context}\n\n"
-            f"Instructions: Answer based on the context above. "
-            f"If not enough information, say you don't know."
-        )
+                prompt_with_context = (
+                    f"Question:\n{user_input}\n\nContext:\n{context}\n\n"
+                    f"Instructions: Answer based on the context above. "
+                    f"If not enough information, say you don't know."
+                )
+                
+        except Exception as e:
+            print(f"⚠️  Retrieval error: {e}")
+            # Fallback to basic context
+            context = f"Error in retrieval: {str(e)}"
+            prompt_with_context = (
+                f"Question: {user_input}\n\n"
+                f"Note: There was an issue with document retrieval. "
+                f"Please answer based on your general knowledge."
+            )
 
         return prompt_with_context
 
@@ -195,6 +292,21 @@ class RagAgent(BaseAgent):
                 self._handle_error(e, messages)
                 continue
 
+    def get_retrieval_stats(self) -> Dict[str, Any]:
+        """Get retrieval performance statistics."""
+        if self.enhanced_retriever:
+            return self.enhanced_retriever.get_stats()
+        return {"enhanced_retrieval": False}
+    
     def run(self):
         """Run the RAG agent (alias for chat_loop)."""
-        self.chat_loop()
+        try:
+            self.chat_loop()
+        finally:
+            # Print retrieval statistics on exit
+            if self.use_enhanced_retrieval:
+                stats = self.get_retrieval_stats()
+                print(f"\n📊 Retrieval Statistics:")
+                print(f"   Total queries: {stats.get('total_queries', 0)}")
+                print(f"   Avg docs retrieved: {stats.get('avg_final_results', 0):.1f}")
+                print(f"   Reranking enabled: {stats.get('reranking_enabled', False)}")

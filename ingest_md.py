@@ -4,6 +4,14 @@ import argparse
 import re
 from typing import Dict, List, Tuple
 from pathlib import Path
+from dotenv import load_dotenv
+
+# 加载 .env 文件
+load_dotenv()
+
+# 解决HuggingFace tokenizers警告
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+os.environ['TRANSFORMERS_NO_ADVISORY_WARNINGS'] = '1'
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
@@ -13,10 +21,86 @@ import chromadb
 from chromadb.config import Settings
 
 
+def smart_chunk_arknights_docs(docs, chunk_size: int, chunk_overlap: int):
+    """为明日方舟文档优化的智能分块策略"""
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+    
+    # 针对中文和结构化内容的分隔符
+    arknights_separators = [
+        "\n## ",  # 二级标题
+        "\n### ",  # 三级标题  
+        "\n\n",  # 双换行
+        "\n技能",  # 技能部分
+        "\n天赋",  # 天赋部分
+        "\n特性",  # 特性部分
+        "\n基础信息",  # 基础信息部分
+        "。\n",  # 中文句号
+        "\n",     # 单换行
+        "。",     # 中文句号
+        r"\. ",    # 英文句号
+        " ",      # 空格
+        ""
+    ]
+    
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        separators=arknights_separators,
+        keep_separator=True  # 保持分隔符以维持上下文
+    )
+    
+    return splitter.split_documents(docs)
+
+
+def _extract_rarity(content_lower: str) -> str:
+    """提取干员稀有度"""
+    rarity_patterns = {
+        "6星": ["6星", "6☆", "6★", "六星"],
+        "5星": ["5星", "5☆", "5★", "五星"],
+        "4星": ["4星", "4☆", "4★", "四星"],
+        "3星": ["3星", "3☆", "3★", "三星"],
+        "2星": ["2星", "2☆", "2★", "二星"],
+        "1星": ["1星", "1☆", "1★", "一星"]
+    }
+    
+    for rarity, patterns in rarity_patterns.items():
+        for pattern in patterns:
+            if pattern.lower() in content_lower:
+                return rarity
+    return "未知"
+
+
+def _extract_operator_class(content_lower: str) -> str:
+    """提取干员职业"""
+    class_patterns = {
+        "先锋": ["先锋", "vanguard"],
+        "近卫": ["近卫", "guard"],
+        "重装": ["重装", "defender"],
+        "狙击": ["狙击", "sniper"],
+        "术师": ["术师", "caster"],
+        "医疗": ["医疗", "medic"],
+        "辅助": ["辅助", "supporter"],
+        "特种": ["特种", "specialist"]
+    }
+    
+    for op_class, patterns in class_patterns.items():
+        for pattern in patterns:
+            if pattern.lower() in content_lower:
+                return op_class
+    return "未知"
+
+
 def build_embeddings(model_name: str | None = None) -> HuggingFaceEmbeddings:
     if not model_name:
-        model_name = os.getenv("EMBED_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2")
-    return HuggingFaceEmbeddings(model_name=model_name)
+        # 优先选择中文优化模型，回退到通用模型
+        model_name = os.getenv("EMBED_MODEL_NAME", "BAAI/bge-large-zh-v1.5")
+    
+    print(f"📊 使用嵌入模型: {model_name}")
+    return HuggingFaceEmbeddings(
+        model_name=model_name,
+        model_kwargs={'device': 'cpu'},  # 可根据需要改为'cuda'
+        encode_kwargs={'normalize_embeddings': True}  # 正则化嵌入向量
+    )
 
 
 def create_chroma_client(host: str, port: int) -> chromadb.HttpClient:
@@ -25,14 +109,14 @@ def create_chroma_client(host: str, port: int) -> chromadb.HttpClient:
 
 
 def classify_by_path(file_path: str) -> Dict[str, str]:
-    """根据文件路径进行目录分类"""
+    """根据文件路径进行目录分类（明日方舟优化版）"""
     path = Path(file_path)
     path_parts = path.parts
 
     # 初始化分类
-    category = "Other"
-    subcategory = None
-    topic = path.stem  # 文件名作为主题
+    category = "Arknights"
+    subcategory = "Operator"
+    topic = path.stem  # 文件名作为主题（干员名称）
 
     # 规则1: 直接子目录分类
     if len(path_parts) > 1:
@@ -61,21 +145,19 @@ def classify_by_path(file_path: str) -> Dict[str, str]:
             category = "Documentation"
             subcategory = "Technical"
 
-    # 规则2: 文件名关键词分类
+    # 规刱2: 文件名关键词分类（明日方舟专用）
     filename = path.name.lower()
-    if not subcategory:  # 如果没有通过目录设置subcategory
-        if any(keyword in filename for keyword in ['rag', 'retrieval']):
-            subcategory = "RAG"
-            category = "AI/RAG"
-        elif any(keyword in filename for keyword in ['agent', 'ai agent']):
-            subcategory = "Agent"
-            category = "AI/RAG"
-        elif any(keyword in filename for keyword in ['transformer', 'bert', 'gpt']):
-            subcategory = "Transformer"
-            category = "AI/RAG"
-        elif any(keyword in filename for keyword in ['tech', '技术', '项目']):
-            subcategory = "Project"
-            category = "Documentation"
+    if subcategory == "Operator":  # 进一步细分干员类型
+        # 根据干员名称特征判断类型（可以根据实际数据调整）
+        if any(char in filename for char in ['银灰', '陈', '博士', 'dr.']):
+            subcategory = "Special_Operator"
+        elif any(char in filename for char in ['阿米娅', '波卢']):
+            subcategory = "Collaboration_Operator"
+    
+    # 技术文档备用分类
+    if category == "Arknights" and any(keyword in filename for keyword in ['tech', '技术', '文档']):
+        category = "Technical"
+        subcategory = "Documentation"
 
     return {
         "category": category,
@@ -86,29 +168,43 @@ def classify_by_path(file_path: str) -> Dict[str, str]:
 
 
 def classify_by_content(content: str, file_path: str) -> Dict[str, any]:
-    """根据文档内容进行主题分类"""
+    """根据文档内容进行主题分类（明日方舟优化版）"""
     content_lower = content.lower()
 
-    # 主题关键词映射
+    # 明日方舟主题关键词映射
     topic_keywords = {
-        "RAG": ["retrieval augmented", "rag", "retrieval", "vector database", "embedding", "similarity search", "retrieval-based"],
-        "Agent": ["ai agent", "autonomous agent", "multi-agent", "agent framework", "langgraph", "crewai", "autogpt"],
-        "Transformer": ["transformer", "attention", "bert", "gpt", "encoder-decoder", "self-attention", "multi-head attention"],
-        "Machine Learning": ["machine learning", "deep learning", "neural network", "training", "model", "algorithm", "supervised", "unsupervised"],
-        "Backend": ["api", "rest", "server", "backend", "database", "gorm", "gin", "fastapi", "flask", "spring"],
-        "Frontend": ["react", "vue", "angular", "javascript", "typescript", "frontend", "ui", "ux", "component"],
-        "DevOps": ["docker", "kubernetes", "ci/cd", "deployment", "devops", "infrastructure", "terraform", "ansible"],
-        "Database": ["database", "sql", "nosql", "mongodb", "postgresql", "mysql", "redis", "elasticsearch"],
-        "Documentation": ["documentation", "docs", "readme", "tutorial", "guide", "manual", "api reference", "getting started"]
+        # 干员相关
+        "Operator_Info": ["干员", "operator", "稀有度", "rarity", "职业", "class", "分支", "branch"],
+        "Operator_Skills": ["技能", "skill", "天赋", "talent", "特性", "trait"],
+        "Operator_Stats": ["攻击力", "attack", "生命值", "hp", "防御力", "defense", "法术抗性", "res"],
+        
+        # 职业分类
+        "Vanguard": ["先锋", "vanguard", "尖兵", "冲锋手", "战术家", "执旗手", "情报官", "策士"],
+        "Guard": ["近卫", "guard", "强攻手", "斗士", "术战者", "教官", "领主", "剑豪"],
+        "Defender": ["重装", "defender", "铁卫", "守护者", "不屈者", "驭法铁卫"],
+        "Sniper": ["狙击", "sniper", "速射手", "重射手", "炮手", "神射手"],
+        "Caster": ["术师", "caster", "中坚术师", "扩散术师", "驭械术师"],
+        "Medic": ["医疗", "medic", "医师", "群愈师", "疗养师"],
+        "Supporter": ["辅助", "supporter", "凝滞师", "削弱者", "吐游者"],
+        "Specialist": ["特种", "specialist", "处决者", "推击手", "伏击客"],
+        
+        # 游戏机制
+        "Game_Mechanics": ["部署费用", "cost", "再部署时间", "redeploy", "攻击间隔", "interval"],
+        "Combat_System": ["阻挡", "block", "攻击范围", "range", "伤害类型", "damage"],
+        
+        # 技术文档备用
+        "Technical": ["api", "database", "rag", "embedding", "vector", "retrieval"]
     }
 
-    # 编程语言识别
-    language_keywords = {
-        "Python": ["python", "django", "flask", "fastapi", "pytorch", "tensorflow", "pandas", "numpy"],
-        "Go": ["golang", " go ", "goroutine", "gorm", "gin", "echo", "fiber"],
-        "Java": ["java", "spring", "springboot", "maven", "gradle", "hibernate", "jpa"],
-        "JavaScript": ["javascript", "nodejs", "node.js", "express", "npm", "react", "vue", "angular"],
-        "TypeScript": ["typescript", "ts", "tsx", "jsx"],
+    # 明日方舟元素识别
+    game_elements = {
+        "Rarity": ["一星", "二星", "三星", "四星", "五星", "六星", "1★", "2★", "3★", "4★", "5★", "6★"],
+        "Faction": ["罗德岛", "rhodes island", "企鹅物流", "penguin logistics", "黑钢", "blacksteel"],
+        "Nation": ["炎国", "yan", "维多利亚", "victoria", "乌萨斯", "ursus", "哥伦比亚", "columbia"],
+        "Element": ["物理", "physical", "法术", "arts", "真伤", "true damage"],
+        "Position": ["远程位", "ranged", "近战位", "melee"],
+        # 技术类型备用
+        "Tech_Language": ["python", "go", "javascript", "api", "database"]
     }
 
     # 匹配主题
@@ -117,25 +213,91 @@ def classify_by_content(content: str, file_path: str) -> Dict[str, any]:
         if any(keyword in content_lower for keyword in keywords):
             detected_topics.append(topic)
 
-    # 匹配编程语言
-    detected_languages = []
-    for lang, keywords in language_keywords.items():
+    # 匹配游戏元素
+    detected_elements = []
+    for element, keywords in game_elements.items():
         if any(keyword in content_lower for keyword in keywords):
-            detected_languages.append(lang)
+            detected_elements.append(element)
 
     # 从文件路径补充信息
     path_classification = classify_by_path(file_path)
 
     return {
-        "topics": detected_topics if detected_topics else ["Other"],
-        "languages": detected_languages if detected_languages else [],
-        "content_type": "tutorial" if any(word in content_lower for word in ["tutorial", "guide", "教程", "指南"]) else
-                        "reference" if any(word in content_lower for word in ["api", "reference", "文档", "reference"]) else
-                        "project",
-        "complexity": "advanced" if any(word in content_lower for word in ["advanced", "complex", "高级", "复杂"]) else
-                      "intermediate" if any(word in content_lower for word in ["intermediate", "中级"]) else
-                      "beginner"
+        "topics": detected_topics if detected_topics else ["General"],
+        "game_elements": detected_elements if detected_elements else [],
+        "content_type": "operator_profile" if any(word in content_lower for word in ["干员", "operator"]) else
+                        "skill_info" if any(word in content_lower for word in ["技能", "skill", "天赋"]) else
+                        "game_guide" if any(word in content_lower for word in ["攻略", "指南", "guide"]) else
+                        "reference",
+        "rarity": _extract_rarity(content_lower),
+        "operator_class": _extract_operator_class(content_lower)
     }
+
+
+def classify_arknights_content(content: str, file_path: str = "") -> Dict[str, any]:
+    """明日方舟内容分类的主入口函数"""
+    # 结合路径和内容分类
+    path_classification = classify_by_path(file_path) if file_path else {}
+    content_classification = classify_by_content(content, file_path)
+    
+    # 合并分类结果
+    return {
+        **path_classification,
+        **content_classification,
+        "confidence": calculate_classification_confidence(content, content_classification)
+    }
+
+
+def calculate_classification_confidence(content: str, classification: Dict[str, any]) -> float:
+    """计算分类置信度"""
+    confidence_score = 0.0
+    content_lower = content.lower()
+    
+    # 基于关键词匹配度计算置信度
+    if classification.get("rarity") != "Unknown":
+        confidence_score += 0.3
+    if classification.get("operator_class") != "未知":
+        confidence_score += 0.3
+    if classification.get("topics") and len(classification["topics"]) > 0:
+        confidence_score += 0.2
+    if classification.get("game_elements") and len(classification["game_elements"]) > 0:
+        confidence_score += 0.2
+    
+    return min(confidence_score, 1.0)
+
+def _extract_rarity(content: str) -> str:
+    """提取干员稀有度"""
+    rarity_patterns = {
+        "6": ["6★", "六星", "6星"],
+        "5": ["5★", "五星", "5星"],
+        "4": ["4★", "四星", "4星"],
+        "3": ["3★", "三星", "3星"],
+        "2": ["2★", "二星", "2星"],
+        "1": ["1★", "一星", "1星"]
+    }
+    
+    for rarity, patterns in rarity_patterns.items():
+        if any(pattern in content for pattern in patterns):
+            return rarity
+    return "Unknown"
+
+def _extract_operator_class(content: str) -> str:
+    """提取干员职业"""
+    class_patterns = {
+        "先锋": ["先锋", "vanguard"],
+        "近卫": ["近卫", "guard"],
+        "重装": ["重装", "defender"],
+        "狙击": ["狙击", "sniper"],
+        "术师": ["术师", "caster"],
+        "医疗": ["医疗", "medic"],
+        "辅助": ["辅助", "supporter"],
+        "特种": ["特种", "specialist"]
+    }
+    
+    for op_class, patterns in class_patterns.items():
+        if any(pattern in content for pattern in patterns):
+            return op_class
+    return "Unknown"
 
 
 def enrich_metadata(doc, original_path: str):
@@ -154,11 +316,12 @@ def enrich_metadata(doc, original_path: str):
         "topic": path_meta["topic"],
         "source_type": path_meta["source_type"],
 
-        # 内容分类（列表转换为逗号分隔的字符串）
+        # 内容分类（针对明日方舟优化）
         "topics": ", ".join(content_meta["topics"]) if isinstance(content_meta["topics"], list) else content_meta["topics"],
-        "languages": ", ".join(content_meta["languages"]) if isinstance(content_meta["languages"], list) and content_meta["languages"] else "",
+        "game_elements": ", ".join(content_meta["game_elements"]) if isinstance(content_meta["game_elements"], list) and content_meta["game_elements"] else "",
         "content_type": content_meta["content_type"],
-        "complexity": content_meta["complexity"],
+        "rarity": content_meta["rarity"],
+        "operator_class": content_meta["operator_class"],
 
         # 系统信息
         "source": original_path,
@@ -172,8 +335,9 @@ def enrich_metadata(doc, original_path: str):
 
 
 def ingest_markdown(docs_dir: str, collection_name: str, host: str, port: int,
-                    chunk_size: int = 1000, chunk_overlap: int = 200,
-                    embed_model_name: str | None = None, enable_auto_classification: bool = True) -> int:
+                    chunk_size: int = 1500, chunk_overlap: int = 300,
+                    embed_model_name: str | None = None, enable_auto_classification: bool = True,
+                    use_smart_chunking: bool = True) -> int:
     """
     Ingest markdown files into Chroma with automatic classification.
 
@@ -199,8 +363,16 @@ def ingest_markdown(docs_dir: str, collection_name: str, host: str, port: int,
     )
     docs = loader.load()
 
-    splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-    chunks = splitter.split_documents(docs)
+    # 智能分块：为明日方舟干员信息优化
+    if use_smart_chunking:
+        chunks = smart_chunk_arknights_docs(docs, chunk_size, chunk_overlap)
+    else:
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size, 
+            chunk_overlap=chunk_overlap,
+            separators=["\n\n", "\n", "。", r"\. ", " ", ""]  # 中文优化分隔符
+        )
+        chunks = splitter.split_documents(docs)
 
     # If no chunks are produced (empty directory or no markdown files), return early
     if not chunks:
@@ -297,9 +469,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--collection", type=str, default=os.getenv("CHROMA_COLLECTION", "md_docs"), help="Chroma collection name")
     parser.add_argument("--chroma-host", type=str, default=os.getenv("CHROMA_HOST", "localhost"), help="Chroma server host")
     parser.add_argument("--chroma-port", type=int, default=int(os.getenv("CHROMA_PORT", "9000")), help="Chroma server port")
-    parser.add_argument("--embed-model", type=str, default=os.getenv("EMBED_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2"), help="Embedding model name")
-    parser.add_argument("--chunk-size", type=int, default=1000, help="Chunk size for splitting")
-    parser.add_argument("--chunk-overlap", type=int, default=200, help="Chunk overlap for splitting")
+    parser.add_argument("--embed-model", type=str, default=os.getenv("EMBED_MODEL_NAME", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"), help="Embedding model name")
+    parser.add_argument("--chunk-size", type=int, default=1500, help="Chunk size for splitting")
+    parser.add_argument("--chunk-overlap", type=int, default=300, help="Chunk overlap for splitting")
+    parser.add_argument("--disable-smart-chunking", action="store_true", help="Disable smart chunking for Arknights content")
     parser.add_argument("--no-classification", action="store_true", help="Disable automatic classification")
     return parser.parse_args()
 
@@ -324,6 +497,7 @@ def main() -> None:
             chunk_overlap=args.chunk_overlap,
             embed_model_name=args.embed_model,
             enable_auto_classification=not args.no_classification,
+            use_smart_chunking=not args.disable_smart_chunking,
         )
         if count == 0:
             print(f"[Info] No markdown files found in '{args.docs_dir}'. Nothing ingested.")

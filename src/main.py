@@ -11,6 +11,10 @@ os.environ['HF_ENDPOINT'] = HF_ENDPOINT
 os.environ['HF_HOME'] = os.path.expanduser('~/.cache/huggingface')
 os.environ['HF_HUB_DOWNLOAD_TIMEOUT'] = '300'
 
+# 解决 HuggingFace tokenizers 并行处理警告
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+os.environ['TRANSFORMERS_NO_ADVISORY_WARNINGS'] = '1'
+
 # Add src directory to Python path
 src_path = Path(__file__).parent
 sys.path.insert(0, str(src_path))

@@ -169,6 +169,46 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help="默认隐藏思考过程"
     )
+    
+    # Scraping options
+    parser.add_argument(
+        "--scrape",
+        action="store_true",
+        help="Enable web scraping mode"
+    )
+    parser.add_argument(
+        "--scrape-url",
+        type=str,
+        help="URL to scrape"
+    )
+    parser.add_argument(
+        "--scraper-type", 
+        type=str,
+        default="default",
+        choices=["default", "prts", "prts_wiki"],
+        help="Type of scraper to use"
+    )
+    parser.add_argument(
+        "--max-pages",
+        type=int,
+        help="Maximum number of pages to scrape"
+    )
+    parser.add_argument(
+        "--scrape-output-dir",
+        type=str,
+        default="scraped_content",
+        help="Directory to save scraped content"
+    )
+    parser.add_argument(
+        "--no-js-render",
+        action="store_true",
+        help="Disable JavaScript rendering for scraping"
+    )
+    parser.add_argument(
+        "--scrape-only",
+        action="store_true", 
+        help="Only scrape content, don't ingest to ChromaDB"
+    )
 
     return parser.parse_args()
 

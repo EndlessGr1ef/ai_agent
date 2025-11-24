@@ -116,10 +116,8 @@ OPENAI_SYSTEM_PROMPT=You are a helpful assistant for software development.
 
 ```bash
 # 交互式聊天
-python src/main.py
-
-# 指定模型
-python src/main.py --model gpt-4-turbo
+python src/main.p
+o
 
 # 自定义系统提示词
 python src/main.py --system "You are a helpful assistant."
