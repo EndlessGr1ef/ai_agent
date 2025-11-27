@@ -94,8 +94,6 @@ def _extract_operator_class(content_lower: str) -> str:
     return "未知"
 
 
-# 移除本地定义的build_embeddings和create_chroma_client函数，使用统一的导入版本
-
 
 def classify_by_path(file_path: str) -> Dict[str, str]:
     """根据文件路径进行目录分类（明日方舟优化版）"""
@@ -106,47 +104,6 @@ def classify_by_path(file_path: str) -> Dict[str, str]:
     category = "Arknights"
     subcategory = "Operator"
     topic = path.stem  # 文件名作为主题（干员名称）
-
-    # 规则1: 直接子目录分类
-    if len(path_parts) > 1:
-        immediate_parent = path_parts[-2].lower()
-
-        if any(keyword in immediate_parent for keyword in ['ai', 'ml', 'rag', 'agent', 'transformer']):
-            category = "AI/RAG"
-            if 'rag' in immediate_parent:
-                subcategory = "RAG"
-            elif 'agent' in immediate_parent:
-                subcategory = "Agent"
-            elif 'transformer' in immediate_parent:
-                subcategory = "Transformer"
-        elif any(keyword in immediate_parent for keyword in ['backend', 'server', 'api', 'go', 'python', 'java']):
-            category = "Backend"
-            if 'go' in immediate_parent or 'golang' in immediate_parent:
-                subcategory = "Go"
-            elif 'python' in immediate_parent:
-                subcategory = "Python"
-            elif 'api' in immediate_parent:
-                subcategory = "API"
-        elif any(keyword in immediate_parent for keyword in ['frontend', 'web', 'react', 'vue']):
-            category = "Frontend"
-            subcategory = "Web"
-        elif any(keyword in immediate_parent for keyword in ['docs', 'doc', 'documentation']):
-            category = "Documentation"
-            subcategory = "Technical"
-
-    # 规刱2: 文件名关键词分类（明日方舟专用）
-    filename = path.name.lower()
-    if subcategory == "Operator":  # 进一步细分干员类型
-        # 根据干员名称特征判断类型（可以根据实际数据调整）
-        if any(char in filename for char in ['银灰', '陈', '博士', 'dr.']):
-            subcategory = "Special_Operator"
-        elif any(char in filename for char in ['阿米娅', '波卢']):
-            subcategory = "Collaboration_Operator"
-    
-    # 技术文档备用分类
-    if category == "Arknights" and any(keyword in filename for keyword in ['tech', '技术', '文档']):
-        category = "Technical"
-        subcategory = "Documentation"
 
     return {
         "category": category,
