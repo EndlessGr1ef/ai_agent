@@ -30,7 +30,7 @@ Examples:
   python scrape_prts.py "https://prts.wiki/w/干员一览"
   
   # Scrape with custom settings
-  python scrape_prts.py "https://prts.wiki/w/干员一览" --max-pages 10 --output-dir docs/prts
+  python scrape_prts.py "https://prts.wiki/w/干员一览" --max-pages 10 --output-dir characters
   
   # Scrape without JavaScript rendering (faster but may miss content)
   python scrape_prts.py "https://prts.wiki/w/干员一览" --no-js-render

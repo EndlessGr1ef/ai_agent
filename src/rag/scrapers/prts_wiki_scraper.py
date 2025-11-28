@@ -4,13 +4,12 @@ import asyncio
 import logging
 import re
 import time
-from typing import List, Dict, Any, Optional, Set, Tuple
+from typing import List, Dict, Any, Optional
 from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 
 from .base_scraper import BaseScraper, ScrapingError
 from ..extractors.js_renderer import JSRenderer
-from .attack_range_parser import AttackRangeParser
 from ..config.scraper_constants import (
     CSS_SELECTORS, CHARACTER_URL_PATTERNS, EXCLUDED_PATTERNS,
     MAX_PAGINATION_PAGES, MIN_CHARACTER_NAME_LENGTH, MAX_LINE_LENGTH_FOR_MERGE,
@@ -114,104 +113,73 @@ class PRTSWikiScraper(BaseScraper):
     
     async def _extract_content_async(self, url: str) -> Dict[str, Any]:
         """Async version of extract_content."""
+        logger.info(f"===== START CONTENT EXTRACTION: {url} =====")
         extraction_start_time = time.time()
         try:
             if self.use_js_renderer:
                 await self._ensure_js_renderer()
-
+                logger.info(f"Rendering page with JS for content extraction: {url}")
+                
                 # Enhanced page rendering with custom waiting options
                 page_data = await self.js_renderer.render_page(
                     url,
                     wait_for_function="() => document.readyState === 'complete'"
                 )
-
+                
                 html_content = page_data['html']
                 page_title = page_data['title']
-
-                # **NEW**: 滚动页面以触发攻击范围SVG和其他懒加载内容
-                if hasattr(self.js_renderer, 'scroll_and_wait'):
-                    # 创建临时page对象进行滚动
-                    page = await self.js_renderer._context.new_page()
-                    try:
-                        await page.set_content(html_content)
-                        await self.js_renderer.scroll_and_wait(page, scroll_pause=2.0, max_scrolls=3)
-
-                        # **NEW**: 等待攻击范围SVG生成
-                        if self._is_character_page(url, soup=None):
-                            attack_range_selectors = [
-                                'svg',  # 任何SVG元素
-                                '.infobox svg',  # infobox中的SVG
-                                '.charbox svg',  # charbox中的SVG
-                            ]
-
-                            svg_found = False
-                            for selector in attack_range_selectors:
-                                try:
-                                    # 等待SVG出现，10秒超时
-                                    await page.wait_for_selector(selector, timeout=10000)
-                                    svg_found = True
-
-                                    # 额外等待确保SVG完全渲染
-                                    await page.wait_for_timeout(2000)
-                                    break
-                                except PlaywrightTimeoutError:
-                                    continue
-
-                        # **NEW**: 等待技能表格加载完成
-                        if self._is_character_page(url, soup=None):
-                            table_selectors = [
-                                'table.wikitable',
-                                'table',
-                                '.wikitable',
-                                '#mw-content-text table'
-                            ]
-
-                            for selector in table_selectors:
-                                try:
-                                    # 等待表格出现，15秒超时
-                                    await page.wait_for_selector(selector, timeout=15000)
-                                    logger.debug(f"Table loaded with selector: {selector}")
-                                    # 额外等待确保表格数据完全渲染
-                                    await page.wait_for_timeout(3000)
-                                    break
-                                except PlaywrightTimeoutError:
-                                    logger.debug(f"Table selector not found: {selector}")
-                                    continue
-
-                        # 获取滚动后的HTML内容
-                        html_content = await page.content()
-                    finally:
-                        await page.close()
-
+                logger.info(f"Page rendered successfully, HTML length: {len(html_content)}, Title: {page_title}")
             else:
                 response = self.make_request(url)
                 html_content = response.text
                 soup = BeautifulSoup(html_content, 'html.parser')
                 page_title = soup.title.string if soup.title else ""
-
+            
             # Parse with BeautifulSoup
             soup = BeautifulSoup(html_content, 'html.parser')
-
+            
+            # Log page structure details
+            logger.debug(f"Page title: {page_title}")
+            logger.debug(f"HTML content length: {len(html_content)} chars")
+            
+            # Log key HTML elements for diagnostic purposes
+            key_elements = ['div', 'section', 'main', 'article', 'table', 'h1', 'h2', 'h3', 'p']
+            for elem in key_elements:
+                count = len(soup.find_all(elem))
+                if count > 0:
+                    logger.debug(f"Found {count} {elem} elements")
+            
             # Check for specific content patterns
             has_tables = len(soup.find_all('table')) > 0
             has_lists = len(soup.find_all(['ul', 'ol'])) > 0
             has_headings = len(soup.find_all(['h1', 'h2', 'h3'])) > 0
-
+            logger.info(f"Content patterns detected - Tables: {has_tables}, Lists: {has_lists}, Headings: {has_headings}")
+            
             # Extract main content
+            logger.info("Attempting main content extraction with primary selectors...")
             main_content = self._extract_main_content(soup)
             main_content_str = str(main_content) if main_content else ""
             main_content_length = len(main_content_str)
-
+            logger.info(f"Main content extraction result: {main_content_length} chars")
+            
+            # Log first 100 chars as sample if content exists
+            if main_content_length > 0:
+                sample = main_content_str[:100].replace('\n', ' ').replace('\r', '') + ("..." if main_content_length > 100 else "")
+                logger.debug(f"Main content sample: {sample}")
+            
             # Extract metadata
             metadata = self._extract_metadata(soup, url, page_title)
-
+            
             # Determine content type
             content_type = self._determine_content_type(url, soup)
-
+            logger.info(f"Detected content type: {content_type}")
+            
             # Special handling for pages with tables (both table_data and character_page)
             if content_type in ['table_data', 'character_page'] and soup.find_all('table'):
+                logger.info(f"Tables detected in {content_type}, prioritizing table extraction...")
                 table_content = self._extract_from_tables(soup)
                 if table_content and len(table_content.strip()) > 100 and '|' in table_content:  # Check for pipe chars in table content
+                    logger.info(f"Successfully extracted table content: {len(table_content)} chars")
                     # Combine table content with a portion of regular content
                     regular_content = self._clean_content(main_content)
                     # Extract first 1000 chars of regular content as introduction
@@ -220,26 +188,37 @@ class PRTSWikiScraper(BaseScraper):
                     # Combine intro and tables
                     cleaned_content = f"{intro_content}\n\n## 详细数据表格\n\n{table_content}"
                 else:
+                    logger.warning("Table extraction yielded limited results, falling back to standard extraction...")
                     cleaned_content = self._clean_content(main_content)
             else:
                 # Standard content cleaning and structuring
+                logger.info("Cleaning and structuring extracted content...")
                 cleaned_content = self._clean_content(main_content)
-
+            
             cleaned_content_length = len(cleaned_content)
             cleaned_content_lines = len(cleaned_content.strip().split('\n'))
-
+            logger.info(f"Cleaned content stats: {cleaned_content_length} chars, {cleaned_content_lines} lines")
+            
             # If cleaned content is empty or insufficient, try alternative extraction methods
             if not cleaned_content.strip() or (content_type == 'table_data' and '|' not in cleaned_content):
+                logger.warning(f"Primary content extraction yielded insufficient content, trying fallback methods...")
+                logger.info("Attempting fallback extraction strategies...")
+                fallback_start_time = time.time()
                 cleaned_content = self._extract_content_fallback(soup)
-
+                fallback_time = time.time() - fallback_start_time
+                fallback_length = len(cleaned_content)
+                fallback_lines = len(cleaned_content.strip().split('\n'))
+                logger.info(f"Fallback extraction completed in {fallback_time:.2f}s with {fallback_length} chars, {fallback_lines} lines")
+            
             # Final content quality assessment
             final_content_length = len(cleaned_content)
             final_content_words = len(cleaned_content.split())
             content_quality = "EXCELLENT" if final_content_length > 1000 else "GOOD" if final_content_length > 500 else "MINIMAL" if final_content_length > 100 else "POOR"
-
+            logger.info(f"Content extraction quality assessment: {content_quality} ({final_content_length} chars, ~{final_content_words} words)")
+            
             # Calculate total extraction time
             extraction_time = time.time() - extraction_start_time
-
+            
             # Create detailed result with extraction metadata
             result = {
                 'url': url,
@@ -258,13 +237,14 @@ class PRTSWikiScraper(BaseScraper):
                     'js_rendering_used': self.use_js_renderer
                 }
             }
-
+            
+            logger.info(f"Content extraction COMPLETE for: {page_title} ({extraction_time:.2f}s)")
             return result
-
+            
         except Exception as e:
             extraction_time = time.time() - extraction_start_time
             logger.error(f"ERROR extracting content from {url} (after {extraction_time:.2f}s): {e}", exc_info=True)
-
+            
             # Log specific error details for common scraping issues
             if 'timeout' in str(e).lower():
                 logger.error(f"Timeout error suggests page loading issues for {url}")
@@ -272,8 +252,11 @@ class PRTSWikiScraper(BaseScraper):
                 logger.error(f"Selector error suggests page structure may have changed for {url}")
             elif 'network' in str(e).lower():
                 logger.error(f"Network error suggests connectivity issues for {url}")
-
+            
+            logger.info(f"===== CONTENT EXTRACTION FAILED: {url} =====")
             raise ScrapingError(f"Failed to extract content: {e}")
+        finally:
+            logger.info(f"===== END CONTENT EXTRACTION: {url} =====")
     
 
     
@@ -307,8 +290,11 @@ class PRTSWikiScraper(BaseScraper):
         links = []
         
         # Debug: Check what content we actually have
-        logger.debug(f"Page title: {soup.title.string if soup.title else 'No title'}")
+        logger.info(f"Page title: {soup.title.string if soup.title else 'No title'}")
         main_content = soup.select_one('#mw-content-text, .mw-parser-output')
+        if main_content:
+            content_text = main_content.get_text()[:200] + "..." if len(main_content.get_text()) > 200 else main_content.get_text()
+            logger.info(f"Main content preview: {content_text}")
         
         # Strategy 1: .name elements (most accurate for overview pages)
         name_divs = soup.select('.name')
@@ -318,20 +304,27 @@ class PRTSWikiScraper(BaseScraper):
         logger.info(f"Found {len(name_links)} links within .name divs matching /w/ pattern")
         
         if name_links:
-            logger.info(f"✓ Processing {len(name_links)} character links")
+            logger.info(f"✓ Processing {len(name_links)} character links in .name elements")
             for i, a_tag in enumerate(name_links):
                 href = a_tag.get('href')
+                title = a_tag.get('title', a_tag.get_text().strip())
+                logger.debug(f"  Link {i+1}: href='{href}', text='{title}'")
                 if href:
                     full_url = urljoin(base_url, href)
                     links.append(full_url)
+                    logger.info(f"  ✓ Added: {title} -> {full_url}")
         else:
-            # Debug: Check what's inside .name divs (simplified)
-            logger.warning("No links found in .name divs, trying alternative selectors...")
-            for i, name_div in enumerate(name_divs[:3]):  # Check first 3 only
+            # Debug: Check what's inside .name divs
+            logger.info("No links found in .name divs, checking their content...")
+            for i, name_div in enumerate(name_divs[:5]):  # Check first 5
+                div_html = str(name_div)[:200]
+                logger.debug(f"  .name div {i+1}: {div_html}...")
+                
                 # Try to find links without /w/ filter
                 all_links_in_div = name_div.select('a[href]')
-                if all_links_in_div:
-                    logger.debug(f"  .name div {i+1}: Found {len(all_links_in_div)} links")
+                logger.debug(f"    - Found {len(all_links_in_div)} total links in this div")
+                for link in all_links_in_div[:2]:  # Show first 2 links
+                    logger.debug(f"      - {link.get('href')} ({link.get_text().strip()})")
         
         # Strategy 2: Character cards or operator cards
         if not links:
@@ -729,9 +722,8 @@ class PRTSWikiScraper(BaseScraper):
             meaningful_lines = [line.strip() for line in lines if line.strip() and len(line.strip()) > 5]
             cleaned = '\n'.join(meaningful_lines)
             logger.info(f"Body extraction result: {len(cleaned)} chars")
-            # Apply text cleaning to format【tags】
-            return self._clean_text(cleaned)
-
+            return cleaned
+        
         return ""
     
     def _remove_unwanted_elements_aggressive(self, content: BeautifulSoup) -> None:
@@ -769,33 +761,11 @@ class PRTSWikiScraper(BaseScraper):
         """Extract structured data from tables with improved formatting and organization."""
         logger.info("Trying optimized table-based extraction...")
         tables = soup.find_all('table')
-
-        # **NEW**: Add detailed logging for debugging
-        logger.info(f"Found {len(tables)} tables on page")
-
         if not tables:
-            logger.debug("No tables found, skipping table extraction")
             return ""
-
+        
         table_contents = []
-        processed_tables = []  # Track processed tables to avoid duplicates
-
-        # Helper function to calculate table hash for duplicate detection
-        def calculate_table_hash(table):
-            """Calculate a hash for the table content to detect duplicates."""
-            import hashlib
-            import re
-
-            # Extract all cell text
-            cells = table.find_all(['td', 'th'])
-            cell_texts = [cell.get_text(strip=True) for cell in cells]
-
-            # Join all text and normalize
-            table_text = '|'.join(sorted(cell_texts))  # Sort for consistency
-
-            # Create hash
-            return hashlib.md5(table_text.encode('utf-8')).hexdigest()
-
+        
         # Helper function to get table context for better titling
         def get_table_context(table, index):
             # Look for preceding heading
@@ -852,11 +822,6 @@ class PRTSWikiScraper(BaseScraper):
         tables_with_priority.sort(key=lambda x: x[1])
         
         for i, (table, _) in enumerate(tables_with_priority):
-            # **NEW**: Log table processing with contextual info
-            table_title = get_table_context(table, i)
-            table_rows = table.find_all('tr')
-            logger.debug(f"Processing table {i+1}/{len(tables_with_priority)}: {table_title[:50]} ({len(table_rows)} rows)")
-
             # Skip tables that look like navigation or UI
             skip = False
             for class_name in ['nav', 'menu', 'sidebar', 'footer', 'pagination']:
@@ -865,7 +830,6 @@ class PRTSWikiScraper(BaseScraper):
                     break
             
             if skip:
-                logger.debug(f"Skipping navigation/UI table: {table_title[:50]}")
                 continue
             
             # Try to extract table data
@@ -893,77 +857,28 @@ class PRTSWikiScraper(BaseScraper):
             
             # Process each row with better structure preservation
             first_data_row_processed = False
-            header_added = False
             for row_idx, row in enumerate(rows):
                 # Extract both th and td cells
                 cells = row.find_all(['td', 'th'])
-
-                # **IMPROVED**: Enhanced cell extraction with fallback to raw HTML
-                cell_texts = []
-                for cell in cells:
-                    # Try to get text content
-                    text = cell.get_text(strip=True)
-
-                    # **NEW**: If text is empty, fall back to raw HTML content
-                    if not text:
-                        # Check for image alt text
-                        img_alt = cell.find('img', alt=True)
-                        if img_alt:
-                            text = img_alt.get('alt', '').strip()
-
-                        # Check for data attributes
-                        if not text:
-                            data_value = cell.get('data-value') or cell.get('data-content')
-                            if data_value:
-                                text = str(data_value).strip()
-
-                        # Final fallback: use stripped HTML if still empty
-                        if not text:
-                            html_content = str(cell)
-                            # Extract text from HTML tags manually
-                            import re
-                            text_match = re.search(r'>([^<]+)<', html_content)
-                            if text_match:
-                                text = text_match.group(1).strip()
-
-                    cell_texts.append(text)
-
-                # Skip empty rows (but log for debugging)
+                cell_texts = [cell.get_text(strip=True) for cell in cells]
+                
+                # Skip empty rows
                 if not any(cell_texts):
-                    logger.debug(f"Skipping empty row {row_idx} in table")
                     continue
-
-                # Fix truncated data in cells (e.g., "48 2" -> "48 | 2")
-                fixed_cell_texts = []
-                for cell_text in cell_texts:
-                    # Check if this looks like truncated data (number followed by space and another number)
-                    import re
-                    # Pattern: digits followed by space and digits, possibly with "→" in between
-                    if re.match(r'^\d+\s+\d+$', cell_text) or re.match(r'^\d+→\d+$', cell_text):
-                        # Replace space with pipe separator
-                        fixed_text = cell_text.replace(' ', ' | ')
-                        fixed_text = fixed_text.replace('→', ' → ')
-                        fixed_cell_texts.append(fixed_text)
-                    else:
-                        fixed_cell_texts.append(cell_text)
-
-                # Handle header row(s) - only add once
-                if row.find_all('th') and not header_added:
+                
+                # Handle header row(s)
+                if row.find_all('th') and (not first_data_row_processed or row_idx == 0):
                     # Add header row
-                    table_text.append(" | ".join(fixed_cell_texts))
+                    table_text.append(" | ".join(cell_texts))
                     # Create proper separator row that matches the number of columns
-                    # Only add separator if we have multiple columns
-                    if len(fixed_cell_texts) > 1:
-                        separator = ["---"] * len(fixed_cell_texts)
-                        table_text.append(" | ".join(separator))
+                    separator = ["---"] * len(cell_texts)
+                    table_text.append(" | ".join(separator))
                     has_header = True
-                    header_added = True
-                    first_data_row_processed = True
                 else:
                     # Regular data row
-                    # **IMPROVED**: Allow all non-empty rows (even single characters)
-                    if len(' '.join(fixed_cell_texts)) > 0:  # Only skip completely empty rows
-                        table_text.append(" | ".join(fixed_cell_texts))
+                    # More permissive filtering - allow shorter rows but skip truly trivial ones
+                    if len(' '.join(cell_texts)) > 5:  # Skip only empty or single character rows
+                        table_text.append(" | ".join(cell_texts))
                     first_data_row_processed = True
             
             # Only add tables with meaningful content
@@ -974,158 +889,17 @@ class PRTSWikiScraper(BaseScraper):
                 table_info = f"> 表格来源: PRTS Wiki | 行数: {len(rows)}"
                 table_text.insert(1, table_info)
                 table_text.append("")  # Add blank line after table
-
-                # Check for duplicates before adding
-                table_content_str = '\n'.join(table_text)
-                table_hash = calculate_table_hash(table)
-
-                # Only add if this is not a duplicate
-                is_duplicate = False
-                for processed_hash in processed_tables:
-                    # Consider tables duplicate if they share more than 80% of their content
-                    # Simple hash-based check first, then do more detailed comparison if needed
-                    if table_hash == processed_hash[0]:
-                        # Detailed comparison for same hash (rare but possible)
-                        similarity = len(set(table_content_str.split()) & set(processed_hash[1].split())) / max(len(table_content_str.split()), len(processed_hash[1].split()))
-                        if similarity > 0.8:
-                            is_duplicate = True
-                            logger.debug(f"Skipping duplicate table: {table_title[:50]}")
-                            break
-
-                if not is_duplicate:
-                    table_contents.append(table_content_str)
-                    processed_tables.append((table_hash, table_content_str))
-                    logger.debug(f"Added table: {table_title[:50]} ({len(table_content_str)} chars)")
-                else:
-                    logger.debug(f"Skipped duplicate table: {table_title[:50]}")
+                
+                table_contents.append('\n'.join(table_text))
         
         if table_contents:
-            # **NEW**: Validate table content quality before merging
-            valid_tables = []
-            for idx, table_content in enumerate(table_contents):
-                # Check if table has actual data rows (not just separators)
-                data_rows = [line for line in table_content.split('\n')
-                            if '|' in line and not line.startswith('>') and '---' not in line]
-
-                if len(data_rows) >= 2:  # At least header + one data row
-                    valid_tables.append(table_content)
-                else:
-                    # Add detailed logging for low-quality tables
-                    table_header = table_content.split('\n')[0] if table_content else "Unknown"
-                    logger.warning(f"Low-quality table detected (only {len(data_rows)} data rows): {table_header[:50]}...")
-                    logger.debug(f"Full table content: {table_content[:200]}...")
-
-                    # Optionally keep tables with at least some content
-                    if len(data_rows) > 0 and len(table_content) > 50:
-                        logger.info(f"Keeping marginal quality table: {table_header[:50]}")
-                        valid_tables.append(table_content)
-
-            if not valid_tables:
-                logger.warning("No valid tables found with sufficient data rows")
-                return ""
-
-            # Merge similar skill tables to reduce redundancy
-            merged_contents = self._merge_similar_tables(valid_tables)
-
             # Add introduction section
             introduction = "# 表格数据\n\n以下是从页面提取的结构化表格数据，按重要性排序：\n\n"
-            combined = introduction + '\n\n---\n\n'.join(merged_contents)  # Separate tables with divider
-            logger.info(f"Optimized table extraction result: {len(combined)} chars, {len(merged_contents)} tables (after merging)")
-            # Apply text cleaning to format【tags】
-            return self._clean_text(combined)
-
+            combined = introduction + '\n\n---\n\n'.join(table_contents)  # Separate tables with divider
+            logger.info(f"Optimized table extraction result: {len(combined)} chars, {len(table_contents)} tables")
+            return combined
+        
         return ""
-
-    def _merge_similar_tables(self, table_contents: list) -> list:
-        """Merge tables with similar skill names to reduce redundancy."""
-        if not table_contents:
-            return []
-
-        merged_tables = []
-        processed_indices = set()
-
-        for i, table in enumerate(table_contents):
-            if i in processed_indices:
-                continue
-
-            # Extract table title and content
-            lines = table.split('\n')
-            title = lines[0] if lines else ""
-
-            # Look for other tables with similar titles (skill tables)
-            similar_tables = [table]
-            similar_indices = {i}
-
-            for j, other_table in enumerate(table_contents):
-                if j != i and j not in processed_indices:
-                    other_lines = other_table.split('\n')
-                    other_title = other_lines[0] if other_lines else ""
-
-                    # Check if titles are similar (same skill name, different levels)
-                    # Extract skill name from title
-                    import re
-                    skill_name_match = re.search(r'技能\s*-\s*表格\s*\d+|([^|]+)\s*-\s*表格', title)
-                    other_skill_match = re.search(r'技能\s*-\s*表格\s*\d+|([^|]+)\s*-\s*表格', other_title)
-
-                    if skill_name_match and other_skill_match:
-                        skill1 = skill_name_match.group(1).strip()
-                        skill2 = other_skill_match.group(1).strip()
-
-                        # If skill names are similar (case-insensitive)
-                        if (skill1.lower() == skill2.lower() or
-                            skill1 in skill2 or skill2 in skill1):
-                            similar_tables.append(other_table)
-                            similar_indices.add(j)
-
-            # If we found similar tables, try to merge them
-            if len(similar_tables) > 1:
-                # Extract skill name for merged table
-                skill_name = re.search(r'技能\s*-\s*表格\s*\d+|([^|]+)\s*-\s*表格', title)
-                if skill_name:
-                    skill_name = skill_name.group(1).strip()
-                    # Clean up skill name - remove extra # symbols and invalid characters
-                    skill_name = re.sub(r'^#+\s*', '', skill_name)  # Remove leading #
-                    skill_name = re.sub(r'[限兑\d]*$', '', skill_name)  # Remove trailing 限/兑/digits
-
-                    # Create merged table
-                    merged_table = f"## 技能 - {skill_name}\n\n"
-                    merged_table += "> 表格来源: PRTS Wiki | 已合并多个表格\n\n"
-
-                    # Combine all rows from similar tables
-                    all_rows = []
-                    headers_added = False
-
-                    for t in similar_tables:
-                        t_lines = t.split('\n')
-                        for line in t_lines:
-                            # Skip title and metadata lines
-                            if line.startswith('##') or line.startswith('>') or not line.strip():
-                                continue
-
-                            # Add header if we see it
-                            if not headers_added and '|' in line and not line.startswith('|'):
-                                all_rows.append(line)
-                                headers_added = True
-                            elif line.startswith('|') or (line.count('|') > 0 and '---' in line):
-                                # This is a table row or separator, skip duplicates
-                                if line not in all_rows:
-                                    all_rows.append(line)
-
-                    if all_rows:
-                        merged_table += '\n'.join(all_rows)
-                        merged_table += '\n'
-                        merged_tables.append(merged_table)
-
-                        # Mark these indices as processed
-                        processed_indices.update(similar_indices)
-                        logger.debug(f"Merged {len(similar_tables)} tables for skill: {skill_name[:30]}")
-            else:
-                # No similar tables, keep as is
-                if i not in processed_indices:
-                    merged_tables.append(table)
-                    processed_indices.add(i)
-
-        return merged_tables
     
     def _extract_from_headings(self, soup: BeautifulSoup) -> str:
         """Extract content structured around headings."""
@@ -1172,9 +946,8 @@ class PRTSWikiScraper(BaseScraper):
         if content_sections:
             combined = '\n\n'.join(content_sections)
             logger.info(f"Heading extraction result: {len(combined)} chars")
-            # Apply text cleaning to format【tags】
-            return self._clean_text(combined)
-
+            return combined
+        
         return ""
     
     def _clean_text(self, text: str) -> str:
@@ -1197,23 +970,10 @@ class PRTSWikiScraper(BaseScraper):
             if not line:
                 continue
             
-            # Enhanced navigation filtering - skip clearly useless content
+            # More permissive filtering - only skip clearly useless content
             if (
-                # Skip very short single-character navigation elements
-                line in ['目', '录', '编辑'] or
-                # Skip lines with excessive navigation keywords (PRTS Wiki specific)
-                (
-                    # Count navigation-related keywords
-                    line.count('干员一览') >= 1 or  # "干员一览" appears
-                    line.count('异格一览') >= 1 or  # "异格一览" appears
-                    line.count('限') >= 2 or  # "限" appears multiple times (限兑限兑)
-                    line.count('兑') >= 2 or  # "兑" appears multiple times
-                    line.count('模组') >= 2 or  # "模组" appears multiple times
-                    # Skip lines that are mostly navigation terms
-                    (len(line) < 100 and
-                     sum(1 for keyword in ['干员一览', '异格一览', '限', '兑', '模组', '天赋', '技能']
-                         if keyword in line) >= 3)
-                ) or
+                # Only skip very specific navigation elements
+                line in ['目', '录', '编辑'] or  
                 # Skip known wiki administrative pages
                 line.startswith('Category:') or
                 line.startswith('File:') or
@@ -1300,108 +1060,14 @@ class PRTSWikiScraper(BaseScraper):
         
         # Only clean extreme cases of repeated punctuation
         result = re.sub(r'[。，、；：！？]{5,}', '...', result)  # Only clean 5+ repeated punctuation marks
-
-        # Fix duplicate headings (e.g., "## ## Title" -> "## Title")
-        result = re.sub(r'^#{3,}\s+', '', result, flags=re.MULTILINE)  # Remove excess # symbols
-        result = re.sub(r'^##\s*##\s+(.+)$', r'## \1', result, flags=re.MULTILINE)  # Fix "## ## Title"
-
-        # Clean up titles with invalid characters (e.g., "限 兑 兑 限 兑 兑 1")
-        result = re.sub(r'^##\s+([限兑\d]+)$', r'', result, flags=re.MULTILINE)  # Remove invalid titles
-
-        # Add line breaks before【character】tags for better readability
-        result = re.sub(r'([^【\n])【', r'\1\n【', result)
-
-        # Add line breaks before section headers (like "综合体检测试", "临床诊断分析")
-        result = re.sub(r'([^。【\n])(综合体检测试|临床诊断分析|档案资料|客观履历|主观评价|晋升记录)', r'\1\n\n\2', result)
-        # Also handle headers that come after punctuation
-        result = re.sub(r'[。]\s*(综合体检测试|临床诊断分析|档案资料|客观履历|主观评价|晋升记录)', r'。\n\n\1', result)
-        # Handle headers that are followed by content without punctuation
-        result = re.sub(r'(综合体检测试|临床诊断分析|档案资料|客观履历|主观评价|晋升记录)\s+([^\n]+)\s+([提升造影])', r'\1\n\n\2 \3', result)
-
-        # Add line breaks after【tags】before paragraph text (to separate content from descriptions)
-        # Pattern: 【标签】标准恩希... -> 【标签】标准\n\n恩希...
-        # Also handle cases like "【标签】标准\n\n综合体检测试"
-        result = re.sub(r'(】[标准优良卓越]*(?:标准)?)\s*(恩希|造影|提升|保密等级|提升信赖)', r'\1\n\n\2', result)
-
-        # Add line breaks between【tags】and following section headers
-        result = re.sub(r'(【[^】]+】[^。！？；\n]*[。！？；])\s*(综合体检测试|临床诊断分析|档案资料|客观履历|主观评价|晋升记录)', r'\1\n\n\2', result)
-
-        # Split long paragraphs for better readability
-        def split_long_paragraphs(text, max_length=120):
-            """Split long paragraphs into shorter ones at sentence boundaries."""
-            lines = text.split('\n')
-            result_lines = []
-
-            for line in lines:
-                # Skip headers, empty lines, and already short lines
-                if not line.strip() or line.startswith('#') or len(line) <= max_length:
-                    result_lines.append(line)
-                    continue
-
-                # Split long paragraph into sentences
-                import re
-                # Split at sentence-ending punctuation followed by a capital letter or newline
-                sentences = re.split(r'([。！？；])(?=\S)', line)
-                current_paragraph = ""
-
-                for i in range(0, len(sentences), 2):
-                    sentence = sentences[i]
-                    punctuation = sentences[i+1] if i+1 < len(sentences) else ''
-                    full_sentence = sentence + punctuation
-
-                    # If adding this sentence would exceed max length, start new paragraph
-                    if len(current_paragraph) + len(full_sentence) > max_length and current_paragraph:
-                        result_lines.append(current_paragraph.strip())
-                        current_paragraph = full_sentence
-                    else:
-                        current_paragraph += full_sentence
-
-                # Add the last paragraph if not empty
-                if current_paragraph.strip():
-                    result_lines.append(current_paragraph.strip())
-
-            return '\n'.join(result_lines)
-
-        result = split_long_paragraphs(result)
-
-        # Validate content quality and log warnings
-        validation_warnings = []
-
-        # Check for proper table structure
-        if result.count('|') > 0:
-            # Count table rows
-            table_rows = [line for line in result.split('\n') if '|' in line and not line.startswith('#')]
-            if table_rows:
-                # Check if tables have consistent column counts
-                for i, row in enumerate(table_rows[:10]):  # Check first 10 table rows
-                    cols = row.split('|')
-                    if len(cols) < 2:
-                        validation_warnings.append(f"Table row {i} has fewer than 2 columns")
-                logger.debug(f"Found {len(table_rows)} table rows, {len(validation_warnings)} warnings")
-
-        # Check for excessive repeated content
-        if '恩希欧迪斯' in result:
-            # Count occurrences of long text blocks
-            blocks = result.split('\n\n')
-            long_blocks = [b for b in blocks if len(b) > 500]
-            if len(long_blocks) > 3:
-                validation_warnings.append(f"Found {len(long_blocks)} very long text blocks (>500 chars)")
-
-        # Log validation results
-        if validation_warnings:
-            logger.info(f"Content validation: {len(validation_warnings)} warnings detected")
-            for warning in validation_warnings[:5]:  # Log first 5 warnings
-                logger.debug(f"  - {warning}")
-        else:
-            logger.debug("Content validation: No issues detected")
-
+        
         # Ensure at least some content is preserved
         if not result.strip():
             logger.warning("Cleaned text resulted in empty content")
             # If all cleaning resulted in empty content, return a minimally processed version
             minimal_result = '\n'.join([line for line in lines if line.strip()])
             return minimal_result.strip() or "[Content extraction produced empty result]"
-
+        
         return result.strip()
     
     def _is_standalone_line(self, line: str) -> bool:
@@ -1419,11 +1085,7 @@ class PRTSWikiScraper(BaseScraper):
                  '获得' in line or '潜能' in line or '范围' in line))
     
     def _is_list_item(self, line: str) -> bool:
-        """Check if line looks like a list item (excluding table rows)."""
-        # Exclude table rows (they contain '|' which is markdown table syntax)
-        if '|' in line and ('---' in line or line.count('|') >= 2):
-            return False
-
+        """Check if line looks like a list item."""
         return (line.startswith(('•', '·', '-', '*')) or
                 re.match(r'^\d+\.', line) or
                 (len(line) < 50 and ('：' in line and line.count('：') == 1)))
@@ -1437,7 +1099,7 @@ class PRTSWikiScraper(BaseScraper):
             'title': title,
             'domain': urlparse(url).netloc,
         }
-
+        
         # Extract infobox data if present
         infobox = soup.select_one('.infobox, .character-info')
         if infobox:
@@ -1445,20 +1107,14 @@ class PRTSWikiScraper(BaseScraper):
             # Extract key-value pairs from infobox
             infobox_data = self._parse_infobox(infobox)
             metadata.update(infobox_data)
-
+        
         # Check for character-specific elements
         if self._is_character_page(url, soup=soup):
             metadata['content_category'] = 'character'
             metadata['character_name'] = self._extract_character_name(title, url)
-
-            # Extract attack range from SVG
-            attack_range_data = self._extract_attack_range(soup)
-            if attack_range_data:
-                metadata['attack_range'] = attack_range_data
-                logger.debug(f"Extracted attack range data for {metadata['character_name']}")
         else:
             metadata['content_category'] = 'general'
-
+        
         return metadata
     
     def _parse_infobox(self, infobox: BeautifulSoup) -> Dict[str, str]:
@@ -1501,143 +1157,7 @@ class PRTSWikiScraper(BaseScraper):
                 return name
         
         return title
-
-    def _extract_attack_range(self, soup: BeautifulSoup) -> Optional[Dict[str, Any]]:
-        """
-        Extract attack range information from SVG images in the page.
-
-        Args:
-            soup: BeautifulSoup对象
-
-        Returns:
-            攻击范围数据字典或None，包含可视化文本
-        """
-        try:
-            # 查找攻击范围SVG元素（通常在infobox或attack-range容器中）
-            svg_selectors = [
-                '.infobox svg',
-                '.charbox svg',
-                '.attack-range svg',
-                'img[alt*="攻击范围"] + svg',
-                'img[alt*="攻击范围"]',  # 有时SVG是内联的
-                '.sp-skill svg',  # 技能范围也可能用SVG表示
-            ]
-
-            svg_element = None
-            for selector in svg_selectors:
-                svg_element = soup.select_one(selector)
-                if svg_element:
-                    logger.debug(f"Found attack range SVG with selector: {selector}")
-                    break
-
-            if not svg_element:
-                logger.debug("No attack range SVG found on page")
-                return None
-
-            # 提取SVG内容
-            svg_content = str(svg_element)
-
-            # 解析攻击范围
-            parser = AttackRangeParser()
-            attack_range_data = parser.parse_svg(svg_content)
-
-            if attack_range_data:
-                logger.info(f"Successfully extracted attack range: {attack_range_data['pattern_name']}")
-
-                # 添加可视化文本
-                grid = attack_range_data.get('grid', [])
-                if grid:
-                    # 生成Border风格可视化
-                    border_viz = self._visualize_attack_range_border(grid)
-                    attack_range_data['border_visual'] = border_viz
-
-                    # 生成Compact风格可视化
-                    compact_viz = self._visualize_attack_range_compact(grid)
-                    attack_range_data['compact_visual'] = compact_viz
-
-                    # 生成向量数据库导出格式
-                    db_export = self._export_attack_range_for_database(attack_range_data)
-                    attack_range_data['database_export'] = db_export
-
-                return attack_range_data
-            else:
-                logger.debug("Failed to parse attack range SVG")
-                return None
-
-        except Exception as e:
-            logger.warning(f"Error extracting attack range: {e}")
-            return None
-
-    def _visualize_attack_range_border(self, grid: List[List[bool]]) -> str:
-        """生成Border风格的攻击范围可视化"""
-        if not grid or not grid[0]:
-            return "无攻击范围"
-
-        lines = []
-        width = len(grid[0])
-
-        # 顶部边框
-        lines.append('┌' + '─' * width + '┐')
-
-        # 中间内容
-        for row in grid:
-            line = '│'
-            for cell in row:
-                line += '█' if cell else ' '
-            line += '│'
-            lines.append(line)
-
-        # 底部边框
-        lines.append('└' + '─' * width + '┘')
-
-        return '\n'.join(lines)
-
-    def _visualize_attack_range_compact(self, grid: List[List[bool]]) -> str:
-        """生成Compact风格的攻击范围可视化"""
-        if not grid or not grid[0]:
-            return "无攻击范围"
-
-        lines = []
-        for row in grid:
-            line = ''.join('X' if cell else '.' for cell in row)
-            lines.append(line)
-
-        return '\n'.join(lines)
-
-    def _export_attack_range_for_database(self, attack_range_data: Dict[str, Any]) -> Dict[str, Any]:
-        """导出适合向量数据库的攻击范围格式"""
-        grid = attack_range_data.get('grid', [])
-
-        # 计算坐标列表
-        coords = []
-        for y, row in enumerate(grid):
-            for x, cell in enumerate(row):
-                if cell:
-                    coords.append((x, y))
-
-        # 生成Border可视化
-        border_visual = attack_range_data.get('border_visual', '')
-        compact_visual = attack_range_data.get('compact_visual', '')
-
-        # 添加元数据
-        metadata = {
-            'type': attack_range_data.get('pattern_name', 'unknown'),
-            'description': attack_range_data.get('description', ''),
-            'range_type': attack_range_data.get('range_type', 'unknown'),
-            'attack_count': attack_range_data.get('attack_cells', 0),
-            'width': len(grid[0]) if grid else 0,
-            'height': len(grid) if grid else 0,
-            'coords': str(sorted(coords))
-        }
-
-        result = {
-            'border': border_visual,
-            'compact': compact_visual,
-            'metadata': metadata
-        }
-
-        return result
-
+    
     def _is_character_page(self, url: str, soup: BeautifulSoup = None) -> bool:
         """
         Check if page represents a character page based on content structure.
@@ -1835,11 +1355,11 @@ class PRTSWikiScraper(BaseScraper):
         from datetime import datetime
         return datetime.now().isoformat()
     
-    async def scrape_character_overview(self, overview_url: str, max_pages: Optional[int] = None) -> List[Dict[str, Any]]:
+    async def scrape_character_overview(self, overview_url: str, max_pages: int = None) -> List[Dict[str, Any]]:
         """
         Scrape character overview page and extract all character pages.
         Supports pagination to scrape multiple pages of character listings.
-
+        
         Args:
             overview_url: URL of the character overview page
             max_pages: Maximum number of character pages to scrape (not pagination pages)
@@ -1920,19 +1440,18 @@ class PRTSWikiScraper(BaseScraper):
         finally:
             await self._close_js_renderer()
     
-    async def _extract_all_character_links_with_pagination(self, start_url: str, max_pages: Optional[int] = None) -> List[str]:
+    async def _extract_all_character_links_with_pagination(self, start_url: str) -> List[str]:
         """
         Extract character links from all pages using interactive pagination.
-
+        
         Args:
             start_url: Starting overview page URL
-            max_pages: Maximum number of pagination pages to process (uses config default if None)
-
+            
         Returns:
             List of all character links across all pages
         """
         all_character_links = []
-        max_pagination_pages = max_pages if max_pages is not None else MAX_PAGINATION_PAGES  # Use provided max_pages or config default
+        max_pagination_pages = MAX_PAGINATION_PAGES  # From config
         
         logger.info(f"Starting interactive pagination from: {start_url}")
         
@@ -1955,27 +1474,30 @@ class PRTSWikiScraper(BaseScraper):
             current_page = 1
             
             while current_page <= max_pagination_pages:
-                logger.info(f"Processing pagination page {current_page}...")
-
+                logger.info(f"Processing pagination page {current_page}")
+                
                 try:
                     # Get page content
                     content = await page.content()
                     soup = BeautifulSoup(content, 'html.parser')
-
+                    
                     # Extract character links from current page
                     page_links = self._extract_links_from_soup(soup, start_url)
-
+                    
                     if page_links:
                         all_character_links.extend(page_links)
-                        logger.info(f"Page {current_page}: +{len(page_links)} links")
-
+                        # Reduced detail log
+                        logger.info(f"Page {current_page}: {len(page_links)} links found")
+                    else:
+                        logger.debug(f"No character links found on page {current_page}")
+                    
                     # Check for next page
                     next_page_num = await self._find_next_page_number(soup)
-
+                    
                     if next_page_num and next_page_num <= max_pagination_pages:
                         # Navigate to next page by clicking
                         success = await self._navigate_to_page(next_page_num, page)
-
+                        
                         if success:
                             current_page = next_page_num
                             # Add delay between pagination requests
@@ -1984,7 +1506,7 @@ class PRTSWikiScraper(BaseScraper):
                             logger.info(f"Could not navigate to page {next_page_num}")
                             break
                     else:
-                        logger.info("No more pagination pages")
+                        logger.info("No more pagination pages found")
                         break
                         
                 except Exception as e:
@@ -2312,8 +1834,10 @@ class PRTSWikiScraper(BaseScraper):
                 
                 current_page = current_state.get('currentPage', 1)
                 character_count = current_state.get('characterCount', 0)
-
+                
                 if current_page == page_number:
+                    # Reduced detail log
+                    logger.info(f"✓ Page {page_number} loaded")
                     return True
                 elif current_page != before_page:
                     logger.warning(f"Navigation landed on page {current_page} instead of {page_number}")

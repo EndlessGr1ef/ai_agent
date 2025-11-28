@@ -1,16 +1,16 @@
 """Enhanced retriever configuration utilities with optimization support."""
 
 from typing import Optional, Dict, Any, Union
-from .embeddings import build_embeddings, build_optimized_embeddings
-from .llm_config import create_chroma_client
+from config.embeddings import build_embeddings, build_optimized_embeddings
+from config.llm_config import create_chroma_client
 from langchain_chroma import Chroma
 
 # Import enhanced retrieval if available
 try:
-    from ..rag.enhanced_retrieval import EnhancedRAGRetriever, RetrievalConfig
-    from .optimized_retrieval_config import (
-        OptimizedRetrievalConfig,
-        get_config_by_name,
+    from rag.enhanced_retrieval import EnhancedRAGRetriever, RetrievalConfig
+    from config.optimized_retrieval_config import (
+        OptimizedRetrievalConfig, 
+        get_config_by_name, 
         load_config_from_env
     )
     ENHANCED_AVAILABLE = True

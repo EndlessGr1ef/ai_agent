@@ -101,7 +101,7 @@ class ScrapePipeline:
             if "干员一览" in start_url or "character" in start_url.lower():
                 # Get character links from all pages with pagination
                 logger.info("Extracting character links with pagination...")
-                character_links = await self.scraper._extract_all_character_links_with_pagination(start_url, max_pages)
+                character_links = await self.scraper._extract_all_character_links_with_pagination(start_url)
                 
                 if not character_links:
                     logger.warning("No character links found")
@@ -117,28 +117,25 @@ class ScrapePipeline:
                 # Process each character page individually
                 for i, char_url in enumerate(character_links, 1):
                     try:
-                        # Extract character name for logging
-                        char_name = self._extract_character_name_from_url(char_url) or f"page_{i}"
-                        logger.info(f"[{i}/{len(character_links)}] Processing: {char_name}")
-
+                        logger.info(f"Processing page {i}/{len(character_links)}: {char_url}")
+                        
                         # Check if this page has already been scraped
                         if await self._is_already_scraped(char_url):
-                            logger.info(f"  ⏭️  Skipped (already exists)")
-                            results['skipped_count'] = results.get('skipped_count', 0) + 1
+                            logger.info(f"⏭️  Skipping already scraped page: {char_url}")
                             continue
-
+                        
                         # Scrape single character page
                         char_data = await self.scraper._extract_content_async(char_url)
-
+                        
                         if char_data:
                             # Convert and save immediately
                             saved_file = await self._convert_and_save_single(char_data, i)
                             if saved_file:
                                 results['saved_files'].append(saved_file)
                                 results['scraped_count'] += 1
-                                logger.info(f"  ✓ Saved")
+                                logger.info(f"✓ Saved: {saved_file}")
                         else:
-                            logger.warning(f"  ✗ No content extracted")
+                            logger.warning(f"No content extracted from {char_url}")
                             
                     except Exception as e:
                         error_msg = f"Error processing {char_url}: {e}"
@@ -304,9 +301,6 @@ class ScrapePipeline:
                     # Last resort: use raw HTML
                     content_text = data.get('raw_html', '')
             
-            # Add character basic info to the beginning of content
-            content_text = self._add_character_basic_info(content_text, data.get('metadata', {}))
-
             # Prepare markdown result with cleaned text content
             markdown_result = {
                 'markdown': content_text,
@@ -348,86 +342,7 @@ class ScrapePipeline:
         except Exception as e:
             logger.error(f"Error saving page {page_num}: {e}")
             return None
-
-    def _add_character_basic_info(self, content: str, metadata: Dict[str, Any]) -> str:
-        """Add character basic info section after the title."""
-        # Only for character pages
-        if not metadata.get('content_category') == 'character':
-            return content
-
-        # Extract character info from metadata
-        char_star = metadata.get('character_star')
-        char_class = metadata.get('character_class')
-        char_branch = metadata.get('character_branch')
-        char_position = metadata.get('character_position')
-        char_tags = metadata.get('character_tags')
-        char_group = metadata.get('character_group')
-
-        # Only add if we have at least some info
-        if not any([char_star, char_class, char_branch, char_group]):
-            return content
-
-        # Build basic info section
-        info_lines = []
-
-        # Add stars
-        if char_star:
-            stars = "★" * int(char_star)
-            info_lines.append(f"**星级**: {stars} ({char_star}星)")
-
-        # Add class and branch
-        class_info = []
-        if char_class:
-            class_info.append(char_class)
-        if char_branch:
-            class_info.append(f"({char_branch})")
-
-        if class_info:
-            info_lines.append(f"**职业**: {''.join(class_info)}")
-
-        # Add position
-        if char_position:
-            info_lines.append(f"**位置**: {char_position}")
-
-        # Add group
-        if char_group:
-            info_lines.append(f"**所属势力**: {char_group}")
-
-        # Add tags
-        if char_tags:
-            info_lines.append(f"**标签**: {char_tags}")
-
-        # Build the info section
-        if info_lines:
-            info_section = "\n".join(info_lines)
-            # Insert after the title line if it exists
-            lines = content.split('\n')
-
-            # Check if first line is the character name
-            if lines and not lines[0].strip().startswith('#'):
-                # First line might be the name, add info after it
-                if len(lines) > 1:
-                    lines.insert(1, info_section)
-                    lines.insert(2, '')  # Empty line after info
-                    return '\n'.join(lines)
-                else:
-                    # Just one line, add info after it
-                    lines.append('')
-                    lines.append(info_section)
-                    return '\n'.join(lines)
-            else:
-                # Insert after the first # heading
-                for i, line in enumerate(lines):
-                    if line.strip().startswith('#'):
-                        # Found a heading, insert after it
-                        lines.insert(i + 1, info_section)
-                        lines.insert(i + 2, '')  # Empty line
-                        break
-
-                return '\n'.join(lines)
-
-        return content
-
+    
     async def _scrape_content(self, start_url: str, max_pages: int = None) -> List[Dict[str, Any]]:
         """Scrape content using PRTS Wiki scraper."""
         try:
@@ -469,14 +384,7 @@ class ScrapePipeline:
                         'markdown': data.get('content', ''),
                         'metadata': data.get('metadata', {})
                     }
-
-                # Add character basic info to content
-                if 'markdown' in markdown_result:
-                    markdown_result['markdown'] = self._add_character_basic_info(
-                        markdown_result['markdown'],
-                        markdown_result.get('metadata', {})
-                    )
-
+                
                 # Generate filename - prioritize name from URL path
                 url = data.get('url', '')
                 file_name = self._extract_character_name_from_url(url)  # This extracts the part after /w/
