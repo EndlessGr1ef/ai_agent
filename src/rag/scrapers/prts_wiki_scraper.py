@@ -22,20 +22,25 @@ logger = logging.getLogger(__name__)
 class PRTSWikiScraper(BaseScraper):
     """Scraper specifically designed for PRTS Wiki (prts.wiki)."""
     
-    def __init__(self, 
+    def __init__(self,
                  use_js_renderer: bool = True,
                  content_selectors: Dict[str, str] = None,
+                 output_dir: str = None,
                  **kwargs):
         """
         Initialize PRTS Wiki scraper.
-        
+
         Args:
             use_js_renderer: Whether to use JavaScript rendering for dynamic content
             content_selectors: CSS selectors for different content types
+            output_dir: Output directory for scraped content
             **kwargs: Additional arguments for BaseScraper
         """
+        # Extract output_dir before passing to parent
+        self.output_dir = output_dir
+
         super().__init__(**kwargs)
-        
+
         self.base_url = "https://prts.wiki"
         self.use_js_renderer = use_js_renderer
         self.js_renderer = None
@@ -1143,391 +1148,17 @@ class PRTSWikiScraper(BaseScraper):
         else:
             return 'general_page'
     
-    def _extract_character_name(self, title: str, url: str) -> str:
-        """Extract character name from title or URL."""
-        # Remove common wiki suffixes
-        title = re.sub(r'\s*-\s*PRTS.*$', '', title)
-        title = re.sub(r'\s*-\s*明日方舟.*$', '', title)
-        
-        # Extract from URL if title is not clean
-        if not title or len(title) > 50:
-            url_parts = url.split('/')
-            if url_parts:
-                name = url_parts[-1].replace('_', ' ')
-                return name
-        
-        return title
     
-    def _is_character_page(self, url: str, soup: BeautifulSoup = None) -> bool:
-        """
-        Check if page represents a character page based on content structure.
-        Since PRTS character URLs are URL-encoded without distinguishing features,
-        we need to analyze page content to determine if it's a character page.
-        """
-        # First, exclude obvious non-character pages by URL
-        if any(exclude in url for exclude in ['一览', 'list', 'index', 'category', 'Category:', 'Template:']):
-            return False
-        
-        # If soup is not provided, we can only do basic URL checks
-        if soup is None:
-            # Basic URL pattern: /w/something (but this is not reliable)
-            return '/w/' in url and url.count('/') == 4  # https://prts.wiki/w/[character]
-        
-        # Content-based detection for character pages
-        return self._detect_character_page_by_content(soup)
     
-    def _detect_character_page_by_content(self, soup: BeautifulSoup) -> bool:
-        """
-        Detect character page by analyzing page content structure.
-        """
-        # Check for character-specific elements
-        character_indicators = [
-            # Character infobox
-            '.infobox.character',
-            '.character-info', 
-            '.干员信息',
-            
-            # Character data tables
-            '.wikitable.character-data',
-            '.character-table',
-            
-            # Character categories
-            'a[href*="Category:干员"]',
-            'a[href*="Category:角色"]',
-            
-            # Character specific sections
-            '.character-profile',
-            '.character-skills',
-            
-            # Skill and talent sections (common in character pages)
-            '*[id*="技能"]',
-            '*[id*="天赋"]',
-            '*[id*="skill"]',
-            '*[id*="talent"]',
-        ]
-        
-        # Count how many character indicators are present
-        indicator_count = 0
-        for selector in character_indicators:
-            if soup.select(selector):
-                indicator_count += 1
-        
-        # If we find multiple character indicators, it's likely a character page
-        if indicator_count >= 2:
-            return True
-            
-        # Check page categories
-        categories = soup.select('a[href*="Category:"]')
-        character_categories = [
-            '干员', '角色', 'Operator', 'Character', 
-            '六星', '五星', '四星', '三星', '二星', '一星',
-            '近卫', '狙击', '重装', '医疗', '辅助', '术师', '特种', '先锋'
-        ]
-        
-        for cat_link in categories:
-            cat_text = cat_link.get_text()
-            if any(char_cat in cat_text for char_cat in character_categories):
-                return True
-        
-        # Check for character-specific text patterns in content
-        content_text = soup.get_text().lower()
-        character_text_patterns = [
-            '干员信息', '角色信息', '基础信息',
-            '技能', '天赋', '精英化', '潜能提升',
-            '部署费用', '再部署时间', '阻挡数',
-            '攻击速度', '生命上限', '攻击力', '防御力', '法术抗性'
-        ]
-        
-        pattern_matches = sum(1 for pattern in character_text_patterns if pattern in content_text)
-        
-        # If we find many character-specific terms, it's likely a character page
-        return pattern_matches >= 3
     
-    async def _filter_character_links(self, links: List[str]) -> List[str]:
-        """
-        Filter links to identify character pages.
-        For overview pages, links from .name elements are already character pages.
-        For other sources, we need content verification.
-        """
-        character_links = []
-        
-        # Basic URL filtering to exclude obviously non-character pages
-        potential_character_links = []
-        for link in links:
-            if self._is_character_page(link, soup=None):  # Basic URL check only
-                potential_character_links.append(link)
-        
-        logger.info(f"Found {len(potential_character_links)} potential character links")
-        
-        # If links came from .name elements in overview page, they're likely all character pages
-        # We can validate a sample to confirm, rather than checking every single one
-        if len(potential_character_links) > 20:  # Looks like an overview page result
-            # Sample validation: check first 3 links to confirm they're character pages
-            sample_links = potential_character_links[:3]
-            sample_character_count = 0
-            
-            for link in sample_links:
-                try:
-                    if self.use_js_renderer:
-                        await self._ensure_js_renderer()
-                        page_data = await self.js_renderer.render_page(link)
-                        html_content = page_data['html']
-                    else:
-                        response = self.make_request(link)
-                        html_content = response.text
-                    
-                    soup = BeautifulSoup(html_content, 'html.parser')
-                    
-                    if self._is_character_page(link, soup=soup):
-                        sample_character_count += 1
-                        
-                    self.add_delay()  # Be respectful
-                    
-                except Exception as e:
-                    logger.error(f"Error checking sample link {link}: {e}")
-                    continue
-            
-            # If majority of samples are character pages, assume all links are character pages
-            if sample_character_count >= 2:  # 2/3 or better
-                logger.info(f"Sample validation passed ({sample_character_count}/3). "
-                           f"Treating all {len(potential_character_links)} links as character pages")
-                return potential_character_links
-        
-        # Full validation for smaller sets or failed sample validation
-        logger.info(f"Performing full validation on {len(potential_character_links)} links...")
-        
-        for i, link in enumerate(potential_character_links):
-            try:
-                # Simple HEAD request first to check if page exists
-                try:
-                    head_response = self.make_request(link, method='HEAD')
-                    if head_response.status_code != 200:
-                        continue
-                except:
-                    # If HEAD fails, try GET anyway
-                    pass
-                
-                # Get page content for analysis
-                if self.use_js_renderer:
-                    await self._ensure_js_renderer()
-                    page_data = await self.js_renderer.render_page(link)
-                    html_content = page_data['html']
-                else:
-                    response = self.make_request(link)
-                    html_content = response.text
-                
-                soup = BeautifulSoup(html_content, 'html.parser')
-                
-                # Check if this is actually a character page
-                if self._is_character_page(link, soup=soup):
-                    character_links.append(link)
-                    logger.info(f"✓ Character page found: {link}")
-                else:
-                    logger.debug(f"✗ Not a character page: {link}")
-                
-                # Add delay between checks
-                if i < len(potential_character_links) - 1:
-                    self.add_delay()
-                    
-            except Exception as e:
-                logger.error(f"Error checking link {link}: {e}")
-                continue
-        
-        logger.info(f"Found {len(character_links)} character pages out of {len(potential_character_links)} checked")
-        return character_links
     
-    def is_target_page(self, url: str, content: str = None) -> bool:
-        """Check if page matches our target criteria."""
-        # Target both character pages and character list pages
-        if '干员一览' in url or 'character' in url.lower():
-            return True
-            
-        # For individual pages, we need content analysis
-        if content:
-            soup = BeautifulSoup(content, 'html.parser')
-            return self._is_character_page(url, soup=soup)
-        
-        # Fallback to basic URL check
-        return self._is_character_page(url, soup=None)
     
     def _get_timestamp(self) -> str:
         """Get current timestamp."""
         from datetime import datetime
         return datetime.now().isoformat()
     
-    async def scrape_character_overview(self, overview_url: str, max_pages: int = None) -> List[Dict[str, Any]]:
-        """
-        Scrape character overview page and extract all character pages.
-        Supports pagination to scrape multiple pages of character listings.
-        
-        Args:
-            overview_url: URL of the character overview page
-            max_pages: Maximum number of character pages to scrape (not pagination pages)
-            
-        Returns:
-            List of scraped character data
-        """
-        try:
-            logger.info(f"Scraping character overview: {overview_url}")
-            
-            # Extract character links from all pages (including pagination)
-            all_character_links = await self._extract_all_character_links_with_pagination(overview_url)
-            
-            # Limit character pages if specified
-            character_links = all_character_links
-            if max_pages and len(character_links) > max_pages:
-                character_links = character_links[:max_pages]
-                logger.info(f"Limited to {max_pages} character pages (out of {len(all_character_links)} available)")
-            
-            if not character_links:
-                logger.warning("No character links found in overview page")
-                
-                # Debug: Let's see what we actually got
-                logger.info("Attempting to debug the page content...")
-                if self.use_js_renderer:
-                    await self._ensure_js_renderer()
-                    page_data = await self.js_renderer.render_page(overview_url)
-                    soup = BeautifulSoup(page_data['html'], 'html.parser')
-                    
-                    # Log some debug info about the page structure
-                    main_content = soup.select_one('#mw-content-text')
-                    if main_content:
-                        # Check for various possible structures
-                        name_divs = main_content.select('.name')
-                        all_links = main_content.select('a[href*="/w/"]')
-                        tables = main_content.select('table')
-                        lists = main_content.select('ul, ol')
-                        
-                        logger.info(f"Debug info:")
-                        logger.info(f"  - .name divs found: {len(name_divs)}")
-                        logger.info(f"  - Total /w/ links: {len(all_links)}")
-                        logger.info(f"  - Tables found: {len(tables)}")
-                        logger.info(f"  - Lists found: {len(lists)}")
-                        
-                        if all_links:
-                            logger.info(f"  - First 5 links:")
-                            for i, link in enumerate(all_links[:5]):
-                                href = link.get('href', 'no-href')
-                                text = link.get_text().strip()[:30]
-                                logger.info(f"    {i+1}. {text} -> {href}")
-                
-                return []
-            
-            logger.info(f"Found {len(character_links)} character pages to scrape")
-            
-            # Scrape each character page
-            results = []
-            for i, link in enumerate(character_links, 1):
-                try:
-                    logger.info(f"Scraping character {i}/{len(character_links)}: {link}")
-                    content = await self._extract_content_async(link)
-                    results.append(content)
-                    
-                    # Add delay between requests
-                    if i < len(character_links):
-                        self.add_delay()
-                        
-                except Exception as e:
-                    logger.error(f"Failed to scrape character page {link}: {e}")
-                    continue
-            
-            logger.info(f"Successfully scraped {len(results)} character pages")
-            return results
-            
-        except Exception as e:
-            logger.error(f"Error scraping character overview: {e}")
-            raise ScrapingError(f"Failed to scrape character overview: {e}")
-        finally:
-            await self._close_js_renderer()
     
-    async def _extract_all_character_links_with_pagination(self, start_url: str) -> List[str]:
-        """
-        Extract character links from all pages using interactive pagination.
-        
-        Args:
-            start_url: Starting overview page URL
-            
-        Returns:
-            List of all character links across all pages
-        """
-        all_character_links = []
-        max_pagination_pages = MAX_PAGINATION_PAGES  # From config
-        
-        logger.info(f"Starting interactive pagination from: {start_url}")
-        
-        if not self.use_js_renderer:
-            logger.info("Enabling JS renderer for interactive pagination")
-            self.use_js_renderer = True
-        
-        await self._ensure_js_renderer()
-        
-        try:
-            # Create a browser page for interactive pagination
-            browser = self.js_renderer._browser
-            page = await browser.new_page()
-            
-            # Load initial page
-            await page.goto(start_url)
-            await page.wait_for_load_state('networkidle')
-            await page.wait_for_selector('.name', timeout=SELECTOR_TIMEOUT)
-            
-            current_page = 1
-            
-            while current_page <= max_pagination_pages:
-                logger.info(f"Processing pagination page {current_page}")
-                
-                try:
-                    # Get page content
-                    content = await page.content()
-                    soup = BeautifulSoup(content, 'html.parser')
-                    
-                    # Extract character links from current page
-                    page_links = self._extract_links_from_soup(soup, start_url)
-                    
-                    if page_links:
-                        all_character_links.extend(page_links)
-                        # Reduced detail log
-                        logger.info(f"Page {current_page}: {len(page_links)} links found")
-                    else:
-                        logger.debug(f"No character links found on page {current_page}")
-                    
-                    # Check for next page
-                    next_page_num = await self._find_next_page_number(soup)
-                    
-                    if next_page_num and next_page_num <= max_pagination_pages:
-                        # Navigate to next page by clicking
-                        success = await self._navigate_to_page(next_page_num, page)
-                        
-                        if success:
-                            current_page = next_page_num
-                            # Add delay between pagination requests
-                            await page.wait_for_timeout(PAGE_NAVIGATION_WAIT)
-                        else:
-                            logger.info(f"Could not navigate to page {next_page_num}")
-                            break
-                    else:
-                        logger.info("No more pagination pages found")
-                        break
-                        
-                except Exception as e:
-                    logger.error(f"Error processing pagination page {current_page}: {e}")
-                    break
-                    
-            await page.close()
-            
-        except Exception as e:
-            logger.error(f"Error in interactive pagination: {e}")
-        
-        # Remove duplicates while preserving order
-        seen = set()
-        unique_links = []
-        for link in all_character_links:
-            if link not in seen:
-                seen.add(link)
-                unique_links.append(link)
-        
-        logger.info(f"✓ Total unique character links from {current_page} pagination pages: {len(unique_links)}")
-        return unique_links
     
     async def _find_next_page_url(self, current_url: str) -> Optional[str]:
         """
@@ -1860,9 +1491,10 @@ class PRTSWikiScraper(BaseScraper):
         return asyncio.run(self._extract_links_async(url))
     
     def is_target_page(self, url: str, content: str = None) -> bool:
-        """Determine if a page is a character page."""
-        if content:
-            soup = BeautifulSoup(content, 'html.parser')
-            return self._is_character_page(url, soup=soup)
+        """Determine if this page is a target page for this scraper."""
+        # This is a generic implementation.
+        # Subclasses should override this method with specific logic.
+        return True
+
         return self._is_character_page(url, soup=None)
     
