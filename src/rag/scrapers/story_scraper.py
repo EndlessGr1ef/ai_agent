@@ -49,15 +49,18 @@ class StoryScraper(BaseScraper):
 
     def _load_existing_files(self) -> Dict[str, str]:
         """
-        加载输出目录中已存在的文件列表，用于去重
+        加载输出目录中已存在的文件列表，用于去重（递归搜索所有子目录）
 
         Returns:
-            Dict[str, str]: 文件名到完整路径的映射
+            Dict[str, str]: 文件相对路径到完整路径的映射
         """
         mapping = {}
         try:
-            for file_path in self.output_dir.glob("*.md"):
-                mapping[file_path.name] = str(file_path)
+            # 使用 **/*.md 递归搜索所有子目录中的md文件
+            for file_path in self.output_dir.glob("**/*.md"):
+                # 使用相对于 output_dir 的路径作为键，支持子目录去重
+                relative_path = file_path.relative_to(self.output_dir)
+                mapping[str(relative_path)] = str(file_path)
         except Exception as e:
             self.logger.warning(f"Failed to load existing files: {e}")
         return mapping
@@ -89,9 +92,12 @@ class StoryScraper(BaseScraper):
         page = await browser.new_page()
         try:
             await page.goto(url, wait_until='domcontentloaded', timeout=30000)
-            await asyncio.sleep(2)  # 等待页面加载
+            # 直接获取HTML，无需等待JavaScript（页面无脚本元素）
             html = await page.content()
             return html
+        except Exception as e:
+            self.logger.error(f"渲染页面时出错: {e}")
+            raise
         finally:
             await page.close()
 
@@ -171,8 +177,15 @@ class StoryScraper(BaseScraper):
             # 4. 生成文件名并检查是否已存在
             filename = self._generate_filename(story_data)
 
-            # 检查文件是否已存在（只检查文件名，不包含路径）
-            if filename in self.existing_files:
+            # 计算文件的相对路径（从 output_dir 开始，包含完整的分类路径）
+            if category_path:
+                # 使用完整的分类路径创建相对路径，与 _create_category_directories 保持一致
+                relative_path = Path(*category_path) / filename
+            else:
+                relative_path = Path(filename)
+
+            # 检查文件是否已存在（基于相对路径，支持子目录去重）
+            if str(relative_path) in self.existing_files:
                 self.logger.info(f"File already exists, skipping: {filename}")
                 return {
                     'success': False,
@@ -180,14 +193,14 @@ class StoryScraper(BaseScraper):
                     'title': story_data.get('title', '未知剧情'),
                     'skipped': True,
                     'reason': 'File already exists',
-                    'existing_file': self.existing_files[filename]
+                    'existing_file': self.existing_files[str(relative_path)]
                 }
 
             # 5. 保存剧情内容（使用分类路径）
             saved_file = await self._save_story_content(story_data, category_path)
 
-            # 6. 更新已存在文件列表
-            self.existing_files[filename] = saved_file
+            # 6. 更新已存在文件列表（使用相对路径作为键）
+            self.existing_files[str(relative_path)] = saved_file
 
             # 7. 准备返回结果
             result = {
@@ -235,47 +248,68 @@ class StoryScraper(BaseScraper):
         """
         self.logger.info(f"Starting batch scraping from: {list_url}")
 
-        # 1. 获取所有剧情链接
-        story_links = await self.scrape_story_list(list_url)
+        # 1. 获取所有剧情链接（带分类信息）
+        story_links = await self.scrape_story_list(list_url, with_categories=True)
 
-        # 2. 限制数量（如果指定）
-        if max_stories:
-            story_links = story_links[:max_stories]
-            self.logger.info(f"Limited to {max_stories} stories")
-
-        # 3. 批量爬取
+        # 2. 批量爬取（跳过重复文件）
         results = []
-        total = len(story_links)
+        total_found = len(story_links)
+        success_count = 0
+        skipped_count = 0
+        failed_count = 0
+        processed = 0
 
-        self.logger.info(f"Scraping {total} story pages...")
+        self.logger.info(f"Found {total_found} story pages (will skip duplicates)")
+        if max_stories:
+            self.logger.info(f"Target: {max_stories} unique stories")
 
-        for i, url in enumerate(story_links, 1):
-            self.logger.info(f"Progress: {i}/{total} - {url}")
+        # 使用while循环，跳过重复文件时不计数
+        i = 0
+        while i < len(story_links) and (max_stories is None or success_count < max_stories):
+            # 获取URL（可能是带分类信息的字典或纯URL）
+            url = story_links[i] if isinstance(story_links[i], str) else story_links[i]['url']
+            processed += 1
+
+            self.logger.info(f"Progress: {success_count + failed_count + 1}/{total_found} "
+                           f"(successful: {success_count}, skipped: {skipped_count}, failed: {failed_count}) - {url[:80]}")
 
             # 添加延迟避免请求过快
-            if i > 1:
+            if success_count > 0 or skipped_count > 0:
                 await asyncio.sleep(self.delay_range[0])
 
             # 爬取单个剧情
             result = await self.scrape_single_story(url)
             results.append(result)
 
+            # 检查结果
+            if result.get('skipped'):
+                # 跳过重复文件，不计数
+                skipped_count += 1
+                self.logger.info(f"Skipped duplicate file: {result.get('reason', 'File already exists')}")
+            elif result.get('success'):
+                # 成功爬取
+                success_count += 1
+                self.logger.info(f"Successfully scraped: {url[:80]}")
+            else:
+                # 爬取失败
+                failed_count += 1
+                self.logger.error(f"Failed to scrape: {url[:80]} - {result.get('error', 'Unknown error')}")
+
             # 实时保存（避免内存溢出）
-            if i % 10 == 0:
-                self.logger.info(f"Completed {i}/{total} stories")
+            if processed % 10 == 0:
+                self.logger.info(f"Processed {processed}/{total_found} links so far")
 
-        # 4. 统计结果
-        success_count = sum(1 for r in results if r.get('success'))
-        skipped_count = sum(1 for r in results if r.get('skipped'))
-        failed_count = total - success_count - skipped_count
+            i += 1
 
+        # 3. 统计结果
         self.logger.info(f"Batch scraping completed:")
-        self.logger.info(f"  Total: {total}")
-        self.logger.info(f"  Success: {success_count}")
-        self.logger.info(f"  Skipped (already exists): {skipped_count}")
+        self.logger.info(f"  Total links found: {total_found}")
+        self.logger.info(f"  Links processed: {processed}")
+        self.logger.info(f"  Success (new files): {success_count}")
+        self.logger.info(f"  Skipped (duplicates): {skipped_count}")
         self.logger.info(f"  Failed: {failed_count}")
-        if total > 0:
-            self.logger.info(f"  Success rate: {success_count/total*100:.1f}%")
+        if processed > 0:
+            self.logger.info(f"  Success rate: {success_count/processed*100:.1f}%")
 
         return results
 

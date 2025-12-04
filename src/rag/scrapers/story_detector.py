@@ -269,10 +269,11 @@ class StoryPageDetector:
         """
         从剧情一览页面提取所有剧情链接（带分类信息）
 
-        基于实际页面结构：使用h2/h3/h4标题层级组织分类
-        - h2: "主线剧情一览"、"活动剧情一览" （一级分类）
-        - h3: "黑暗时代·上"、"黑暗时代·下"等 （二级分类）
-        - 链接：位于h3标题下方的div/p中，用"·"分隔
+        基于实际页面结构：使用table/tr/th/td标签组织分类
+        - Row 1: 包含"主线剧情一览"或"活动剧情一览"作为顶级分类
+        - Subsequent rows: 第一个th是子分类（如"特殊"、"黑暗时代·上"等），最后一个th是类型（如"剧情"、"主线"）
+        - td: 包含链接列表
+        - 支持嵌套table结构（如"离解复合/主线"）
 
         Args:
             soup: BeautifulSoup对象
@@ -288,19 +289,103 @@ class StoryPageDetector:
 
         links_with_categories = []
 
-        # 找到所有h2标题
-        h2_titles = soup.find_all('h2')
+        # 查找所有table
+        tables = soup.find_all('table')
 
-        for h2 in h2_titles:
-            h2_text = h2.get_text(strip=True)
+        for table_idx, table in enumerate(tables):
+            # 获取table的文本内容，检查是否包含我们要的分类
+            table_text = table.get_text()
+            if '主线剧情一览' not in table_text and '活动剧情一览' not in table_text:
+                continue
 
-            # 检查是否为我们要的顶级分类
-            if any(keyword in h2_text for keyword in ['主线剧情一览', '活动剧情一览']):
-                # 解析该h2下的所有内容
-                current_path = [h2_text]  # 一级分类路径
+            # 检查table的列数，如果列数过多（如37列），可能是复杂的表头，跳过
+            first_tr = table.find('tr')
+            if first_tr:
+                th_count_in_first_tr = len(first_tr.find_all('th'))
+                # 如果第一行有超过5个th，很可能是复杂表头，跳过
+                if th_count_in_first_tr > 5:
+                    print(f"跳过Table {table_idx+1}，列数过多({th_count_in_first_tr}列)")
+                    continue
 
-                # 遍历h2下的所有后续兄弟元素，直到下一个h2
-                self._parse_heading_section(h2, base_url, current_path, links_with_categories)
+            # 找到包含顶级分类的行
+            tr_rows = table.find_all('tr')
+            top_category_row = None
+            top_category_path = []
+
+            for tr in tr_rows:
+                th_tags = tr.find_all('th')
+                if th_tags:
+                    th_texts = [self._clean_category_name(th.get_text(strip=True)) for th in th_tags]
+                    # 检查是否包含顶级分类
+                    if any(keyword in text for text in th_texts
+                           for keyword in ['主线剧情一览', '活动剧情一览', '支线剧情一览']):
+                        top_category_row = tr
+                        top_category_path = th_texts
+                        break
+
+            if not top_category_row:
+                continue
+
+            # 解析后续行的分类和链接
+            current_path = top_category_path
+            sibling = top_category_row.find_next_sibling()
+
+            while sibling:
+                if sibling.name != 'tr':
+                    sibling = sibling.find_next_sibling()
+                    continue
+
+                tr = sibling
+                th_tags = tr.find_all('th')
+                td_tags = tr.find_all('td')
+
+                if th_tags:
+                    th_texts = [self._clean_category_name(th.get_text(strip=True)) for th in th_tags]
+
+                    # 更新分类路径
+                    # 第一个th是子分类，最后一个th是类型
+                    if len(th_texts) >= 2:
+                        # 构造完整的分类路径
+                        subcategory = th_texts[0]
+                        category_type = th_texts[-1] if len(th_texts) > 1 else ''
+
+                        # 使用顶级分类 + 子分类作为路径
+                        # 例如：['主线剧情一览', '黑暗时代·上']
+                        category_path = top_category_path + [subcategory]
+
+                        # 检查是否有嵌套的table（在td中）
+                        for td in td_tags:
+                            # 先处理直接链接
+                            links = td.find_all('a', href=True)
+
+                            for link in links:
+                                href = link.get('href')
+
+                                if not href or not href.startswith('/w/'):
+                                    continue
+
+                                full_url = urljoin(base_url, href)
+
+                                # 检查是否为潜在的剧情链接
+                                if self._is_potential_story_link(full_url):
+                                    links_with_categories.append({
+                                        'url': full_url,
+                                        'category_path': tuple(category_path),
+                                        'title': link.get_text(strip=True)
+                                    })
+
+                            # 再处理嵌套的table
+                            nested_tables = td.find_all('table', recursive=False)
+                            if nested_tables:
+                                # 递归处理嵌套table，继承当前的分类路径
+                                nested_links = self._extract_from_nested_table(
+                                    nested_tables[0],
+                                    base_url,
+                                    category_path
+                                )
+                                links_with_categories.extend(nested_links)
+
+                sibling = tr.find_next_sibling()
 
         # 去重（基于URL）
         seen_urls = set()
@@ -313,67 +398,77 @@ class StoryPageDetector:
         # 按分类路径排序
         return sorted(unique_links, key=lambda x: (x['category_path'], x['url']))
 
-    def _parse_heading_section(self, heading, base_url: str, current_path: List[str], result: List[Dict[str, Any]]):
+    def _extract_from_nested_table(self, table, base_url: str, parent_category_path: List[str]) -> List[Dict[str, Any]]:
         """
-        解析标题下的内容区域
+        从嵌套的table中提取链接
 
         Args:
-            heading: 当前h2标题元素
+            table: 嵌套的table BeautifulSoup对象
             base_url: 基础URL
-            current_path: 当前分类路径
-            result: 结果存储列表
-        """
-        # 获取下一个兄弟元素
-        sibling = heading.find_next_sibling()
+            parent_category_path: 父级分类路径
 
-        while sibling and sibling.name != 'h2':  # 直到下一个h2
-            if sibling.name == 'h3':
-                # 二级分类
-                h3_text = sibling.get_text(strip=True)
-                new_path = current_path + [h3_text]
-
-                # 查找h3下的链接
-                self._extract_links_from_element(sibling, base_url, new_path, result)
-
-                # 递归解析h3下的子元素（可能有h4）
-                self._parse_heading_section(sibling, base_url, new_path, result)
-
-            elif sibling.name in ['p', 'div']:
-                # 直接的段落或div，可能包含链接
-                self._extract_links_from_element(sibling, base_url, current_path, result)
-
-            sibling = sibling.find_next_sibling()
-
-    def _extract_links_from_element(self, element, base_url: str, category_path: List[str], result: List[Dict[str, Any]]):
-        """
-        从元素中提取链接
-
-        Args:
-            element: 要解析的HTML元素
-            base_url: 基础URL
-            category_path: 分类路径
-            result: 结果存储列表
+        Returns:
+            List[Dict[str, Any]]: 提取的链接列表
         """
         from urllib.parse import urljoin
+        links = []
 
-        # 查找该元素及其子元素中的所有链接
-        links = element.find_all('a', href=True)
+        # 查找tr行
+        tr_rows = table.find_all('tr')
+        for tr in tr_rows:
+            th_tags = tr.find_all('th')
+            td_tags = tr.find_all('td')
 
-        for link in links:
-            href = link.get('href')
+            if th_tags and td_tags:
+                th_texts = [self._clean_category_name(th.get_text(strip=True)) for th in th_tags]
 
-            if not href or not href.startswith('/w/'):
-                continue
+                # 第一个th是嵌套的子分类
+                if len(th_texts) >= 1:
+                    nested_subcategory = th_texts[0]
+                    # 构造完整的分类路径：父级路径 + 嵌套子分类
+                    full_category_path = parent_category_path + [nested_subcategory]
 
-            full_url = urljoin(base_url, href)
+                    # 在td中查找链接
+                    for td in td_tags:
+                        links_in_td = td.find_all('a', href=True)
 
-            # 检查是否为潜在的剧情链接
-            if self._is_potential_story_link(full_url):
-                result.append({
-                    'url': full_url,
-                    'category_path': tuple(category_path),
-                    'title': link.get_text(strip=True)
-                })
+                        for link in links_in_td:
+                            href = link.get('href')
+
+                            if not href or not href.startswith('/w/'):
+                                continue
+
+                            full_url = urljoin(base_url, href)
+
+                            if self._is_potential_story_link(full_url):
+                                links.append({
+                                    'url': full_url,
+                                    'category_path': tuple(full_category_path),
+                                    'title': link.get_text(strip=True)
+                                })
+
+        return links
+
+    def _clean_category_name(self, category_name: str) -> str:
+        """
+        清理分类名称，移除特殊标记和前缀
+
+        Args:
+            category_name: 原始分类名称
+
+        Returns:
+            str: 清理后的分类名称
+        """
+        # 移除 [隐藏▲] 前缀
+        category_name = re.sub(r'^\[隐藏▲\]\s*', '', category_name)
+
+        # 移除其他常见的标记
+        category_name = re.sub(r'^\[.*?\]\s*', '', category_name)
+
+        # 清理空格
+        category_name = category_name.strip()
+
+        return category_name
 
     def _is_potential_story_link(self, url: str) -> bool:
         """

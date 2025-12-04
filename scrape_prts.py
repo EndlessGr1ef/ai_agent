@@ -215,8 +215,8 @@ async def scrape_stories(url: str, max_stories: Optional[int], output_dir: str):
     scraper = StoryScraper(output_dir=output_dir)
 
     print("🔍 正在提取剧情链接...")
-    # 获取所有剧情链接
-    story_links = await scraper.scrape_story_list(url)
+    # 获取所有剧情链接（默认启用分类功能）
+    story_links = await scraper.scrape_story_list(url, with_categories=True)
 
     if max_stories:
         story_links = story_links[:max_stories]
@@ -234,9 +234,11 @@ async def scrape_stories(url: str, max_stories: Optional[int], output_dir: str):
 
     results = []
     for i, link in enumerate(story_links, 1):
-        print(f"\r⏳ 进度: {i}/{len(story_links)} - {link[:50]}...", end='', flush=True)
+        # Handle both dict (with categories) and string (without categories)
+        url = link['url'] if isinstance(link, dict) else link
+        print(f"\r⏳ 进度: {i}/{len(story_links)} - {url[:80]}...", end='', flush=True)
 
-        result = await scraper.scrape_single_story(link)
+        result = await scraper.scrape_single_story(url)
         results.append(result)
 
         # 添加延迟
