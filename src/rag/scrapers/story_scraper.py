@@ -47,6 +47,9 @@ class StoryScraper(BaseScraper):
         # 缓存：URL到分类路径的映射
         self._url_to_category_cache: Dict[str, Tuple[str, ...]] = {}
 
+        # 缓存：URL到标题的映射（直接从链接提取，最准确）
+        self._url_to_title_cache: Dict[str, str] = {}
+
     def _load_existing_files(self) -> Dict[str, str]:
         """
         加载输出目录中已存在的文件列表，用于去重（递归搜索所有子目录）
@@ -136,9 +139,12 @@ class StoryScraper(BaseScraper):
         if with_categories:
             story_data = self.detector.extract_story_links_with_categories(soup, list_url)
 
-            # 更新URL到分类路径的缓存
+            # 更新URL到分类路径和标题的缓存
             for item in story_data:
                 self._url_to_category_cache[item['url']] = item['category_path']
+                # 缓存URL到标题的映射（用于预去重）
+                if 'title' in item:
+                    self._url_to_title_cache[item['url']] = item['title']
 
             self.logger.info(f"Found {len(story_data)} story pages with categories")
             return story_data  # 返回带分类信息的列表
@@ -150,7 +156,7 @@ class StoryScraper(BaseScraper):
 
     async def scrape_single_story(self, url: str) -> Dict[str, Any]:
         """
-        爬取单个剧情页面
+        爬取单个剧情页面（极致优化版：基于URL章节名预去重，无需预先加载页面）
 
         Args:
             url: 剧情页面URL
@@ -161,48 +167,88 @@ class StoryScraper(BaseScraper):
         self.logger.info(f"Scraping story page: {url}")
 
         try:
-            # 1. 渲染页面
+            # 1. 快速预检查：获取分类路径
+            category_path = self._resolve_category_path(url)
+
+            # 2. 🚀 核心优化：基于缓存的title进行预去重检查！
+            #    策略：从缓存获取title（直接从链接提取），生成文件名，检查是否已存在
+            cached_title = self._url_to_title_cache.get(url)
+            found_existing = False
+            existing_file_path = None
+
+            if cached_title:
+                # 使用缓存的title生成文件名
+                from pathlib import Path
+                title = cached_title
+                import re
+                # 清理文件名（与 _generate_filename 保持一致）
+                title = re.sub(r'[<>:"/\\|?*]', '_', title)
+                title = title.strip(' .')
+                if len(title) > 80:
+                    title = title[:80]
+                predicted_filename = f"{title}.md"
+
+                # 计算相对路径
+                if category_path:
+                    relative_path = Path(*category_path) / predicted_filename
+                else:
+                    relative_path = Path(predicted_filename)
+
+                # 检查文件是否已存在
+                if str(relative_path) in self.existing_files:
+                    found_existing = True
+                    existing_file_path = self.existing_files[str(relative_path)]
+                    self.logger.info(f"Found matching file (by cached title): {existing_file_path}")
+
+            # 如果找到了已存在的文件，直接跳过
+            if found_existing:
+                self.logger.info(f"File already exists (pre-check by title), skipping: {cached_title}")
+                return {
+                    'success': False,
+                    'url': url,
+                    'title': 'Unknown (skipped - file exists)',
+                    'skipped': True,
+                    'reason': 'File already exists (pre-check by title)',
+                    'existing_file': existing_file_path
+                }
+
+            # 3. 渲染页面（只有当文件不存在时才进行）
             browser = await self.get_browser()
             page = await browser.new_page()
-
             await page.goto(url, wait_until='domcontentloaded', timeout=30000)
             await asyncio.sleep(2)
 
-            # 2. 提取剧情内容
+            # 4. 提取完整剧情内容
             story_data = await self.extractor.extract_story_content(page, url)
 
-            # 3. 查找分类路径
-            category_path = self._resolve_category_path(url)
+            # 5. 使用真实标题生成文件名
+            actual_filename = self._generate_filename(story_data)
 
-            # 4. 生成文件名并检查是否已存在
-            filename = self._generate_filename(story_data)
-
-            # 计算文件的相对路径（从 output_dir 开始，包含完整的分类路径）
+            # 6. 计算相对路径（使用真实文件名和分类路径）
             if category_path:
-                # 使用完整的分类路径创建相对路径，与 _create_category_directories 保持一致
-                relative_path = Path(*category_path) / filename
+                actual_relative_path = Path(*category_path) / actual_filename
             else:
-                relative_path = Path(filename)
+                actual_relative_path = Path(actual_filename)
 
-            # 检查文件是否已存在（基于相对路径，支持子目录去重）
-            if str(relative_path) in self.existing_files:
-                self.logger.info(f"File already exists, skipping: {filename}")
+            # 7. 再次检查是否已存在（最终确认 + 防止竞态条件）
+            if str(actual_relative_path) in self.existing_files:
+                self.logger.info(f"File already exists (final check), skipping: {actual_filename}")
                 return {
                     'success': False,
                     'url': url,
                     'title': story_data.get('title', '未知剧情'),
                     'skipped': True,
-                    'reason': 'File already exists',
-                    'existing_file': self.existing_files[str(relative_path)]
+                    'reason': 'File already exists (final check)',
+                    'existing_file': self.existing_files[str(actual_relative_path)]
                 }
 
-            # 5. 保存剧情内容（使用分类路径）
+            # 8. 保存剧情内容（使用分类路径）
             saved_file = await self._save_story_content(story_data, category_path)
 
-            # 6. 更新已存在文件列表（使用相对路径作为键）
-            self.existing_files[str(relative_path)] = saved_file
+            # 9. 更新已存在文件列表（使用实际相对路径作为键）
+            self.existing_files[str(actual_relative_path)] = saved_file
 
-            # 7. 准备返回结果
+            # 10. 准备返回结果
             result = {
                 'success': True,
                 'url': url,
@@ -211,7 +257,7 @@ class StoryScraper(BaseScraper):
                 'narration_count': story_data.get('metadata', {}).get('total_narrations', 0),
                 'character_count': story_data.get('metadata', {}).get('character_count', 0),
                 'saved_file': saved_file,
-                'category_path': category_path,  # 添加分类路径信息
+                'category_path': category_path,
                 'data': story_data
             }
 
