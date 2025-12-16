@@ -5,6 +5,7 @@
 import asyncio
 import os
 import logging
+import time
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
@@ -18,12 +19,13 @@ from .story_constants import STORAGE_DIR
 class StoryScraper(BaseScraper):
     """剧情页面专用爬虫"""
 
-    def __init__(self, output_dir: str = "docs/prts/剧情", **kwargs):
+    def __init__(self, output_dir: str = "docs/prts/剧情", max_concurrent: int = 5, **kwargs):
         """
         初始化剧情爬虫
 
         Args:
             output_dir: 输出目录
+            max_concurrent: 最大并发数 (default: 5, 建议: 5-8)
             **kwargs: 传递给BaseScraper的其他参数
         """
         super().__init__(**kwargs)
@@ -39,6 +41,11 @@ class StoryScraper(BaseScraper):
 
         # Playwright相关
         self._browser = None
+
+        # 并发控制
+        self.max_concurrent = max_concurrent
+        self.semaphore = asyncio.Semaphore(max_concurrent)
+        self.logger.info(f"Initialized with max_concurrent={max_concurrent}")
 
         # 加载已存在的文件列表（用于去重）
         self.existing_files = self._load_existing_files()
@@ -281,6 +288,19 @@ class StoryScraper(BaseScraper):
             if 'page' in locals():
                 await page.close()
 
+    async def _scrape_with_semaphore(self, url: str) -> Dict[str, Any]:
+        """
+        使用semaphore控制并发数的单页面抓取
+
+        Args:
+            url: 页面URL
+
+        Returns:
+            Dict[str, Any]: 抓取结果
+        """
+        async with self.semaphore:
+            return await self.scrape_single_story(url)
+
     async def scrape_all_stories(self, list_url: str, max_stories: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         爬取所有剧情页面
@@ -359,6 +379,81 @@ class StoryScraper(BaseScraper):
 
         return results
 
+    async def scrape_all_stories_parallel(self, list_url: str, max_stories: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        并发爬取所有剧情页面 - 多线程版本
+
+        Args:
+            list_url: 剧情一览页面URL
+            max_stories: 最大爬取数量（可选）
+
+        Returns:
+            List[Dict[str, Any]]: 爬取结果列表
+        """
+        self.logger.info(f"Starting parallel scraping from: {list_url}")
+        self.logger.info(f"Max concurrent: {self.max_concurrent}")
+
+        # 1. 获取所有剧情链接（带分类信息）
+        story_links = await self.scrape_story_list(list_url, with_categories=True)
+
+        # 2. 限制数量（如果指定）
+        if max_stories:
+            story_links = story_links[:max_stories]
+
+        total_found = len(story_links)
+        self.logger.info(f"Found {total_found} story pages to process")
+
+        if not story_links:
+            self.logger.warning("No story pages found")
+            return []
+
+        # 3. 创建并发任务
+        self.logger.info(f"Creating {len(story_links)} concurrent tasks...")
+        tasks = []
+        for item in story_links:
+            url = item if isinstance(item, str) else item['url']
+            task = asyncio.create_task(self._scrape_with_semaphore(url))
+            tasks.append(task)
+
+        # 4. 等待所有任务完成（并发执行）
+        self.logger.info("Starting concurrent execution...")
+        start_time = time.time()
+
+        # 使用gather批量等待，支持异常处理
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 处理异常结果
+        processed_results = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                self.logger.error(f"Task {i} failed with exception: {result}")
+                processed_results.append({
+                    'success': False,
+                    'url': story_links[i] if isinstance(story_links[i], str) else story_links[i]['url'],
+                    'error': str(result)
+                })
+            else:
+                processed_results.append(result)
+
+        # 5. 统计结果
+        elapsed_time = time.time() - start_time
+        success_count = sum(1 for r in processed_results if r.get('success'))
+        skipped_count = sum(1 for r in processed_results if r.get('skipped'))
+        failed_count = len(processed_results) - success_count - skipped_count
+
+        self.logger.info("="*60)
+        self.logger.info("Parallel scraping completed:")
+        self.logger.info(f"  Total pages: {total_found}")
+        self.logger.info(f"  Success (new): {success_count}")
+        self.logger.info(f"  Skipped (duplicates): {skipped_count}")
+        self.logger.info(f"  Failed: {failed_count}")
+        self.logger.info(f"  Success rate: {success_count/(success_count+failed_count)*100 if (success_count+failed_count) > 0 else 0:.1f}%")
+        self.logger.info(f"  Time elapsed: {elapsed_time:.1f}s")
+        self.logger.info(f"  Average time per page: {elapsed_time/total_found:.2f}s" if total_found > 0 else "  N/A")
+        self.logger.info("="*60)
+
+        return processed_results
+
     def is_target_page(self, url: str, content: Optional[str] = None) -> bool:
         """
         判断是否为剧情目标页面
@@ -420,7 +515,7 @@ class StoryScraper(BaseScraper):
 
     async def _save_story_content(self, story_data: Dict[str, Any], category_path: Tuple[str, ...] = None) -> str:
         """
-        保存剧情内容到文件（支持分类目录）
+        保存剧情内容到文件（支持分类目录）- 异步I/O版本
 
         Args:
             story_data: 剧情数据
@@ -446,7 +541,7 @@ class StoryScraper(BaseScraper):
         # 添加文件头
         content_with_header = self._add_file_header(content, story_data)
 
-        # 保存文件
+        # 保存文件 - 使用异步I/O不阻塞事件循环
         try:
             import aiofiles
             async with aiofiles.open(file_path, 'w', encoding='utf-8') as f:

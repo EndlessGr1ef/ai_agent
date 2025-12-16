@@ -129,11 +129,51 @@ def interactive_selection() -> tuple[str, str, Optional[int], str]:
 
     print(f"\n📁 输出目录: {output_dir}")
 
+    # 询问并发数（仅对剧情爬取）
+    print("\n" + "="*60)
+    if content_type == 'story' or content_type == 'all':
+        print("⚙️  并发设置（剧情爬取）:")
+        print("   - 并发可以大幅提升抓取速度")
+        print("   - 建议设置5-8，避免被反爬虫检测")
+        print("   - 串行模式速度慢但更稳定\n")
+
+        while True:
+            try:
+                concurrent_input = input(
+                    f"最大并发数 [默认: 5, 输入 0 使用串行模式]: "
+                ).strip()
+
+                if not concurrent_input:
+                    max_concurrent = 5
+                else:
+                    max_concurrent = int(concurrent_input)
+
+                if max_concurrent < 0:
+                    print("❌ 并发数不能为负数")
+                    continue
+                if max_concurrent == 0:
+                    print("✅ 使用串行模式")
+                    max_concurrent = 1  # 串行模式实际上就是并发数1
+                elif max_concurrent > 10:
+                    print("⚠️  警告: 并发数过高可能导致被反爬虫检测")
+
+                break
+
+            except ValueError:
+                print("❌ 请输入有效数字")
+            except KeyboardInterrupt:
+                print("\n\n👋 操作已取消")
+                sys.exit(0)
+
+        print(f"\n⚙️  并发设置: {max_concurrent}")
+    else:
+        max_concurrent = 5  # 干员爬取默认5
+
     print("\n" + "="*60)
     print("🚀 准备开始爬取...")
     print("="*60 + "\n")
 
-    return content_type, url, max_pages, output_dir
+    return content_type, url, max_pages, output_dir, max_concurrent
 
 
 async def scrape_characters(url: str, max_pages: Optional[int], output_dir: str):
@@ -208,11 +248,18 @@ async def scrape_characters(url: str, max_pages: Optional[int], output_dir: str)
     print("="*60 + "\n")
 
 
-async def scrape_stories(url: str, max_stories: Optional[int], output_dir: str):
+async def scrape_stories(url: str, max_stories: Optional[int], output_dir: str, max_concurrent: int = 5):
     """爬取剧情内容"""
     print("📋 正在初始化剧情爬虫...")
 
-    scraper = StoryScraper(output_dir=output_dir)
+    # 检查是否使用串行模式
+    use_parallel = max_concurrent > 1
+    if use_parallel:
+        print(f"🚀 使用并发模式 (并发数: {max_concurrent})")
+        scraper = StoryScraper(output_dir=output_dir, max_concurrent=max_concurrent)
+    else:
+        print("🔄 使用串行模式")
+        scraper = StoryScraper(output_dir=output_dir, max_concurrent=1)
 
     print("🔍 正在提取剧情链接...")
     # 获取所有剧情链接（默认启用分类功能）
@@ -231,29 +278,38 @@ async def scrape_stories(url: str, max_stories: Optional[int], output_dir: str):
     # 批量爬取
     print(f"\n🚀 开始爬取剧情内容...")
     print(f"📊 总数: {len(story_links)}")
+    if use_parallel:
+        print(f"⚡ 并发模式 - 同时处理 {max_concurrent} 个页面")
+    else:
+        print("🔄 串行模式 - 逐个处理页面")
 
-    results = []
-    for i, link in enumerate(story_links, 1):
-        # Handle both dict (with categories) and string (without categories)
-        url = link['url'] if isinstance(link, dict) else link
-        print(f"\r⏳ 进度: {i}/{len(story_links)} - {url[:80]}...", end='', flush=True)
+    # 使用并行或串行模式
+    if use_parallel:
+        results = await scraper.scrape_all_stories_parallel(url, max_stories)
+    else:
+        # 串行模式（原有逻辑）
+        results = []
+        for i, link in enumerate(story_links, 1):
+            # Handle both dict (with categories) and string (without categories)
+            url = link['url'] if isinstance(link, dict) else link
+            print(f"\r⏳ 进度: {i}/{len(story_links)} - {url[:80]}...", end='', flush=True)
 
-        result = await scraper.scrape_single_story(url)
-        results.append(result)
+            result = await scraper.scrape_single_story(url)
+            results.append(result)
 
-        # 添加延迟
-        await asyncio.sleep(scraper.delay_range[0])
-
-    print("\n")
+            # 添加延迟
+            await asyncio.sleep(scraper.delay_range[0])
+        print("\n")
 
     # 显示摘要
-    scraper.print_summary(results)
+    if not use_parallel:
+        scraper.print_summary(results)
 
     print(f"📁 输出目录: {output_dir}/剧情/")
     print("\n")
 
 
-async def scrape_all(max_pages: Optional[int], output_dir: str):
+async def scrape_all(max_pages: Optional[int], output_dir: str, max_concurrent: int = 5):
     """爬取全部内容（干员 + 剧情）"""
     print("\n" + "="*60)
     print("📋 阶段 1/2: 爬取干员信息")
@@ -265,7 +321,7 @@ async def scrape_all(max_pages: Optional[int], output_dir: str):
     print("📋 阶段 2/2: 爬取剧情内容")
     print("="*60 + "\n")
 
-    await scrape_stories(STORY_LIST_URL, max_pages, output_dir)
+    await scrape_stories(STORY_LIST_URL, max_pages, output_dir, max_concurrent)
 
     print("\n" + "="*60)
     print("🎉 全部爬取完成!")
@@ -345,6 +401,27 @@ def parse_arguments():
         help="Disable JavaScript rendering (faster but may miss dynamic content)"
     )
 
+    # 并发控制参数
+    parser.add_argument(
+        "--max-concurrent", "-c",
+        type=int,
+        default=5,
+        help="最大并发数 (default: 5, 建议: 5-8)"
+    )
+
+    parser.add_argument(
+        "--serial",
+        action="store_true",
+        help="使用串行模式（禁用并发抓取）"
+    )
+
+    parser.add_argument(
+        "--parallel",
+        action="store_true",
+        default=True,
+        help="使用并发抓取（默认启用）"
+    )
+
     # 交互模式
     parser.add_argument(
         "--interactive", "-i",
@@ -391,12 +468,18 @@ async def main():
 
         if interactive_mode:
             # 交互模式
-            content_type, url, max_count, output_dir = interactive_selection()
+            content_type, url, max_count, output_dir, max_concurrent = interactive_selection()
         else:
             # 命令行模式
             content_type = args.type
             max_count = args.max
             output_dir = args.output
+
+            # 获取并发数
+            if args.serial:
+                max_concurrent = 1  # 串行模式
+            else:
+                max_concurrent = args.max_concurrent
 
             # 根据类型确定URL
             if content_type in ['characters', 'character']:
@@ -417,18 +500,19 @@ async def main():
         logger.info(f"Content type: {content_type}")
         logger.info(f"Output directory: {output_dir}")
         logger.info(f"Max count: {max_count or 'unlimited'}")
+        logger.info(f"Max concurrent: {max_concurrent}")
         logger.info(f"JavaScript rendering: {'disabled' if args.no_js_render else 'enabled'}")
 
         # 执行爬取
         if content_type == 'all':
             # 全部内容
-            await scrape_all(max_count, output_dir)
+            await scrape_all(max_count, output_dir, max_concurrent)
         elif content_type in ['characters', 'character']:
             # 干员信息
             await scrape_characters(url, max_count, output_dir)
         elif content_type in ['stories', 'story']:
             # 剧情内容
-            await scrape_stories(url, max_count, output_dir)
+            await scrape_stories(url, max_count, output_dir, max_concurrent)
         else:
             print("❌ 无效的内容类型")
             return 1
