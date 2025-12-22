@@ -80,9 +80,9 @@ def main() -> None:
     if args.session_id:
         try:
             from utils.memory_manager import MemoryManager
-            from config.embeddings import build_embeddings
+            from config import get_global_embeddings
             
-            embeddings = build_embeddings(args.embed_model)
+            embeddings = get_global_embeddings(model_name=args.embed_model)
             chroma_client = None
             
             # Create Chroma client (will be used for memory)

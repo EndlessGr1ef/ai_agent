@@ -34,6 +34,20 @@ class ChromaQueryTool:
             print("请确保ChromaDB服务正在运行")
             sys.exit(1)
 
+    def _detect_embedding_dim(self, collection_name: str):
+        """检测指定 collection 的向量维度（若可用）。"""
+        try:
+            col = self.client.get_collection(collection_name)
+            sample = col.get(include=["embeddings"], limit=1)
+            if sample and sample.get("embeddings"):
+                emb = sample["embeddings"][0]
+                if isinstance(emb, list):
+                    return len(emb)
+        except Exception:
+            # 某些服务端/版本可能不支持返回 embeddings，忽略即可
+            pass
+        return None
+
     def _get_collection_name(self, index):
         """从索引获取collection名称"""
         if 0 <= index < len(self.collections):
@@ -188,14 +202,34 @@ class ChromaQueryTool:
                 return
 
         try:
-            # 尝试使用本地embedding
+            # 优先检测 collection 期望维度（若可用）
+            expected_dim = self._detect_embedding_dim(collection_name)
+            if expected_dim:
+                print(f"ℹ️  Collection 期望向量维度: {expected_dim}")
+
+            # 优先设置 Hugging Face 镜像以提升可用性（如已手动配置则不覆盖）
+            os.environ.setdefault("HF_ENDPOINT", os.getenv("HF_ENDPOINT", "https://hf-mirror.com"))
+
+            # 使用全局 embedding 管理器，保证 embedding 模型与主项目一致
             try:
-                from langchain_huggingface import HuggingFaceEmbeddings
-                embeddings = HuggingFaceEmbeddings(
-                    model_name="sentence-transformers/all-MiniLM-L6-v2"
-                )
-                print("✓ 使用本地 embedding 模型")
+                # 确保 src 目录在 sys.path 且作为包导入
+                src_path = os.path.join(os.path.dirname(__file__), 'src')
+                if src_path not in sys.path:
+                    sys.path.insert(0, src_path)
+                from config import get_global_embeddings
+                embeddings = get_global_embeddings()
+                model_name = getattr(embeddings, 'model_name', str(embeddings))
+                print(f"✓ 使用全局 embedding 模型: {model_name}")
+
+                # 先计算一次查询向量，并与期望维度（如果可用）进行比对
                 query_embedding = embeddings.embed_query(query_text)
+                actual_dim = len(query_embedding) if hasattr(query_embedding, '__len__') else None
+
+                if expected_dim and actual_dim and expected_dim != actual_dim:
+                    print(f"⚠️  维度不匹配: collection 需要 {expected_dim}，当前模型输出 {actual_dim}")
+                    print("请设置环境变量 EMBED_MODEL_NAME 为与 collection 维度一致的本地或已缓存模型，"
+                          "或使用查询工具删除并重建 collection。")
+                    return
 
                 col = self.client.get_collection(collection_name)
                 results = col.query(
@@ -228,6 +262,18 @@ class ChromaQueryTool:
             except ImportError:
                 print("❌ 需要安装 langchain-huggingface 和 sentence-transformers")
                 print("  pip install langchain-huggingface sentence-transformers")
+            except Exception as ee:
+                # 更友好的 HuggingFace 下载失败/离线提示
+                print(f"❌ 构建/调用 embedding 失败: {ee}")
+                if expected_dim == 384:
+                    print("建议设置 EMBED_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2 或使用其本地路径。")
+                elif expected_dim == 1024:
+                    print("建议设置 EMBED_MODEL_NAME=BAAI/bge-large-zh-v1.5 或提供其本地路径（需提前缓存）。")
+                else:
+                    print("可尝试设置 EMBED_MODEL_NAME 为与 collection 一致的模型，"
+                          "或提前使用 huggingface-cli 下载到本地后通过本地路径加载。")
+                print("也可设置 HF_ENDPOINT=https://hf-mirror.com 提升模型下载可用性。")
+                return
 
         except Exception as e:
             print(f"❌ 搜索失败: {e}\n")

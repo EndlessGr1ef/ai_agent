@@ -15,7 +15,6 @@ from collections import defaultdict
 logger = logging.getLogger(__name__)
 
 from langchain_core.documents import Document
-from langchain_huggingface import HuggingFaceEmbeddings
 
 
 @dataclass

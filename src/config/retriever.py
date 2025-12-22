@@ -1,20 +1,22 @@
 """Enhanced retriever configuration utilities with optimization support."""
 
-from typing import Optional, Dict, Any, Union
-from .embeddings import build_embeddings, build_optimized_embeddings
+from typing import Optional, Dict, Any, Union, TYPE_CHECKING
+from .embedding_manager import get_global_embeddings
 from .llm_config import create_chroma_client
 from langchain_chroma import Chroma
 
-# Import enhanced retrieval if available
+# Always import optimized retrieval config (doesn't depend on enhanced module)
+from .optimized_retrieval_config import (
+    OptimizedRetrievalConfig,
+    get_config_by_name,
+    load_config_from_env,
+)
+
+# Import enhanced retrieval if available (optional dependency)
 try:
     from ..rag.enhanced_retrieval import EnhancedRAGRetriever, RetrievalConfig
-    from .optimized_retrieval_config import (
-        OptimizedRetrievalConfig,
-        get_config_by_name,
-        load_config_from_env
-    )
     ENHANCED_AVAILABLE = True
-except ImportError:
+except Exception:
     ENHANCED_AVAILABLE = False
 
 
@@ -54,11 +56,8 @@ def build_retriever(
         Enhanced retriever if available, otherwise basic retriever
     """
     
-    # Build embeddings with optimized settings
-    if embed_model_name:
-        embeddings = build_embeddings(embed_model_name)
-    else:
-        embeddings = build_optimized_embeddings(config_profile)
+    # Build embeddings with optimized settings - always use global instance
+    embeddings = get_global_embeddings(model_name=embed_model_name)
     
     # Create Chroma client and vector store
     client = create_chroma_client(host, port)

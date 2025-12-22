@@ -15,13 +15,12 @@ os.environ['TRANSFORMERS_NO_ADVISORY_WARNINGS'] = '1'
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 import chromadb
 from chromadb.config import Settings
 
 # 导入我们统一的嵌入模型配置
-from src.config.embeddings import build_embeddings
+from src.config import get_global_embeddings
 from src.config.llm_config import create_chroma_client
 
 
@@ -662,7 +661,7 @@ def ingest_markdown(docs_dir: str, collection_name: str, host: str, port: int,
         enriched_chunk = enrich_metadata(chunk, original_path)
         enriched_chunks.append(enriched_chunk)
 
-    embeddings = build_embeddings(embed_model_name)
+    embeddings = get_global_embeddings(model_name=embed_model_name)
     client = create_chroma_client(host, port)
 
     # 创建带有分类信息的collection metadata
