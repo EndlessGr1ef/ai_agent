@@ -85,10 +85,17 @@ class StatusBar:
 class OutputFormatter:
     """Enhanced output formatter with thinking process display control."""
 
-    def __init__(self):
-        """Initialize the output formatter."""
+    def __init__(self, prts_mode: bool = True):
+        """Initialize the output formatter.
+        
+        Args:
+            prts_mode: Whether to use PRTS terminal style output (default: True)
+        """
         self.reasoning_displayed = False
         self.answer_displayed = False
+
+        # PRTS mode control - default enabled
+        self.prts_mode = prts_mode
 
         # Thinking process display control - always hidden (removed toggle functionality)
         self.show_thinking = False  # Default: always hide thinking process
@@ -112,8 +119,11 @@ class OutputFormatter:
         self.thinking_cache = ""  # Clear thinking cache
 
     def print_assistant_header(self):
-        """Print the 'Assistant:' header."""
-        print("Assistant:")
+        """Print the assistant header (PRTS style or standard)."""
+        if self.prts_mode:
+            print("[PRTS]$")
+        else:
+            print("Assistant:")
         # Start timer when assistant begins responding
         self.status_bar.start_timer()
 
@@ -123,7 +133,10 @@ class OutputFormatter:
             elapsed = time.time() - self.status_bar.start_time
             self.status_bar.stop_timer()
             duration_str = self.status_bar._format_duration(elapsed)
-            print(f"\n[Info] Call duration: {duration_str}")
+            if self.prts_mode:
+                print(f"\n[STATUS] 响应完成 | 耗时: {duration_str}")
+            else:
+                print(f"\n[Info] Call duration: {duration_str}")
 
     def print_thinking(self, thinking_content: str):
         """Print thinking content with formatting.
@@ -157,36 +170,38 @@ class OutputFormatter:
         Args:
             answer_content: The answer content to print
         """
-        # Filter out status bar content that shouldn't appear in answers
-        # Remove lines that look like status updates or thinking indicators
+        # Filter out content that shouldn't appear in streaming output
         lines = answer_content.split('\n')
         filtered_lines = []
 
         for line in lines:
-            # Skip lines that are clearly status information (思考: XXX tokens | ⏱ Xs | ...)
-            # or lines that are just timer updates (⏱ Xs | ...)
-            if ('思考:' in line and 'tokens' in line and '⏱' in line and 's |' in line) or \
-               (line.strip().startswith('⏱') and 's |' in line and ('思考' in line or 'tokens' in line)):
+            # Skip [SUMMARY] lines - these are for memory extraction, not display
+            if line.strip().startswith('[SUMMARY]'):
                 continue
-            # Skip empty lines
-            if line.strip() == '':
+            # Skip status bar artifacts
+            if ('思考:' in line and 'tokens' in line and '⏱' in line) or \
+               (line.strip().startswith('⏱') and 's |' in line):
+                continue
+            # Skip JSON format artifacts
+            if line.strip() in ['```json', '```', '{', '}']:
+                continue
+            if line.strip().startswith('"summary"') or line.strip().startswith('"content"'):
                 continue
             filtered_lines.append(line)
 
         filtered_content = '\n'.join(filtered_lines)
+        
+        # Skip if no content after filtering
+        if not filtered_content.strip():
+            return
 
         # Only show [answers] label if thinking process is being displayed
         if self.show_thinking and not self.answer_displayed:
-            # First answer output with thinking displayed
             print()
             print("[answers] ", end="", flush=True)
             self.answer_displayed = True
         elif not self.show_thinking and not self.answer_displayed:
-            # No thinking process, print directly without extra spacing
             self.answer_displayed = True
-        elif not self.show_thinking and self.answer_displayed:
-            # Add space between multiple parts when no thinking
-            print(" ", end="", flush=True)
 
         print(filtered_content, end="", flush=True)
 
@@ -201,7 +216,10 @@ class OutputFormatter:
             error_msg: The error message to print
         """
         print()
-        print(f"[Error] {error_msg}")
+        if self.prts_mode:
+            print(f"[ERROR] {error_msg}")
+        else:
+            print(f"[Error] {error_msg}")
 
     def print_hint(self, hint_msg: str):
         """Print a hint message.
@@ -209,7 +227,10 @@ class OutputFormatter:
         Args:
             hint_msg: The hint message to print
         """
-        print(f"[Hint] {hint_msg}")
+        if self.prts_mode:
+            print(f"[INFO] {hint_msg}")
+        else:
+            print(f"[Hint] {hint_msg}")
 
     def update_thinking_tokens(self, thinking_tokens: int, show_timer: bool = True):
         """Update thinking tokens in status bar with optional timer.

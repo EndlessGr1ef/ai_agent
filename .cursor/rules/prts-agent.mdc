@@ -1,0 +1,124 @@
+---
+description: PRTS AI Agent 开发规范 - 明日方舟罗德岛战术系统模拟器
+globs:
+  - "**/*.py"
+  - "**/*.md"
+alwaysApply: true
+---
+
+# PRTS AI Agent 开发规范
+
+## 项目概述
+
+构建模拟明日方舟 **PRTS (Pre-stage Rhodesia Tactical System)** 的 AI Agent。
+- 爬取 PRTS Wiki (prts.wiki) 干员/剧情内容
+- ChromaDB 向量存储 + RAG 检索
+- 模拟 PRTS 终端风格交互
+
+技术栈: LangChain, ChromaDB, Playwright, BAAI/bge-large-zh-v1.5
+
+---
+
+## PRTS 人格设定
+
+PRTS 是罗德岛中央数据库和战术系统，博士的专属 AI 助手。
+
+### 输出格式（必须遵循）
+
+```
+[PRTS]$ 正在处理查询请求...
+[INFO] 连接数据库... 完成
+[INFO] 验证博士权限... 通过
+
+==== 查询结果 ====
+[数据内容]
+
+[STATUS] 查询完成 | 耗时: 0.23s
+[PRTS]$ 还有其他需要查询的信息吗，博士？
+```
+
+### 状态指示器
+
+- `[PRTS]$` 系统提示符 | `[INFO]` 一般信息 | `[AUTH]` 权限验证
+- `[STATUS]` 状态报告 | `[WARN]` 警告 | `[ERROR]` 错误 | `[CLASSIFIED]` 机密
+
+### 语言特点
+
+- **始终称呼用户为"博士"**
+- 正式但亲近的语气，数据化回答风格
+- 模拟数据库查询过程
+
+---
+
+## 代码规范
+
+- **代码内容英文**: 注释、日志、commit、错误消息
+- **用户交互中文**: 提示、帮助信息、CLI 菜单
+- 命名: 类 `PascalCase`，函数 `snake_case`，常量 `UPPER_SNAKE_CASE`
+- 爬虫使用异步 + semaphore 控制并发 (建议 5-8)
+- 文件 I/O 使用 aiofiles
+
+---
+
+## 爬虫规范
+
+### 干员文档元数据
+```yaml
+title: 干员名称
+content_type: character
+```
+
+### 剧情文档元数据
+```yaml
+title: 剧情标题
+content_type: story
+dialogue_count: N
+characters: 角色1, 角色2
+```
+
+剧情格式: 对话 `**角色名**: 内容`，旁白 `*描述*`
+
+---
+
+## ChromaDB 元数据
+
+| 字段 | 说明 |
+|------|------|
+| `category` | Arknights |
+| `subcategory` | Operator / MainStory / EventStory |
+| `doc_type` | story / operator / general |
+| `rarity` | 干员稀有度 (6星等) |
+| `operator_class` | 职业 (近卫/术师等) |
+| `story_type` | mainline / event / character |
+| `chapter` | 章节名 |
+| `characters` | 登场角色 |
+
+---
+
+## 明日方舟术语
+
+| 术语 | 说明 |
+|------|------|
+| 源石 Originium | 泰拉大陆特殊矿物 |
+| 矿石病 Oripathy | 源石导致的不治之症 |
+| 感染者 Infected | 矿石病患者 |
+| 天灾 Catastrophe | 周期性自然灾害 |
+| 干员 Operator | 罗德岛战斗/后勤人员 |
+| 博士 Doctor | 战术指挥官(玩家角色) |
+
+### 主要势力
+
+罗德岛、整合运动、莱茵生命、企鹅物流、黑钢国际
+
+### 干员职业
+
+先锋/近卫/重装/狙击/术师/医疗/辅助/特种
+
+---
+
+## 开发注意
+
+1. 所有响应保持 PRTS 终端风格
+2. 使用 `BAAI/bge-large-zh-v1.5` 嵌入模型
+3. 爬虫并发 5-8，避免重复爬取
+4. 确保文档包含完整分类元数据

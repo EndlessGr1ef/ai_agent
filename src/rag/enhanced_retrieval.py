@@ -5,6 +5,7 @@ import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import logging
+import time
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 import numpy as np
@@ -13,6 +14,16 @@ import re
 from collections import defaultdict
 
 logger = logging.getLogger(__name__)
+
+# Performance timing flag - can be enabled via environment variable
+ENABLE_TIMING = os.getenv("PRTS_ENABLE_TIMING", "true").lower() == "true"
+
+
+def _log_timing(step_name: str, elapsed: float, extra_info: str = ""):
+    """Log timing information for a processing step."""
+    if ENABLE_TIMING:
+        info = f" | {extra_info}" if extra_info else ""
+        print(f"[TIMING] {step_name}: {elapsed*1000:.1f}ms{info}")
 
 from langchain_core.documents import Document
 
@@ -23,21 +34,21 @@ class RetrievalConfig:
     # Embedding settings
     embedding_model: str = os.getenv('EMBED_MODEL_NAME', 'BAAI/bge-large-zh-v1.5')  # 默认使用中文优化模型
     
-    # Retrieval parameters
-    initial_k: int = 8  # Retrieve more documents initially
-    final_k: int = 4    # Final number after reranking
+    # Retrieval parameters - optimized for speed and conciseness
+    initial_k: int = 4   # Reduced from 8 for faster retrieval
+    final_k: int = 2     # Reduced from 4 for more focused context
     similarity_threshold: float = 0.7
     
     # Reranking settings
     use_reranking: bool = True
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     
-    # Query enhancement
+    # Query enhancement - disable rewrite for speed
     enable_query_expansion: bool = True
-    enable_query_rewrite: bool = True
+    enable_query_rewrite: bool = False  # Disabled for faster queries
     
-    # Context building
-    max_context_length: int = 8000
+    # Context building - reduced for concise responses
+    max_context_length: int = 4000  # Reduced from 8000
     enable_deduplication: bool = True
     similarity_dedup_threshold: float = 0.85
 
@@ -211,16 +222,21 @@ class EnhancedRAGRetriever:
     
     def retrieve(self, query: str, **kwargs) -> List[Document]:
         """Enhanced retrieval with query processing and reranking."""
+        total_start = time.time()
         self.retrieval_stats["total_queries"] += 1
         
         # Step 1: Query enhancement
+        step_start = time.time()
         enhanced_queries = self._enhance_query(query)
+        _log_timing("查询增强", time.time() - step_start, f"生成 {len(enhanced_queries)} 个查询变体")
         
         # Step 2: Retrieve from multiple query variants
+        step_start = time.time()
         all_documents = []
         for enhanced_query in enhanced_queries:
             docs = self._retrieve_base(enhanced_query, **kwargs)
             all_documents.extend(docs)
+        _log_timing("向量检索", time.time() - step_start, f"检索到 {len(all_documents)} 条文档")
         
         initial_count = len(all_documents)
         self.retrieval_stats["avg_initial_results"] = (
@@ -230,11 +246,16 @@ class EnhancedRAGRetriever:
         
         # Step 3: Deduplication
         if self.config.enable_deduplication:
+            step_start = time.time()
+            before_dedup = len(all_documents)
             all_documents = self.deduplicator.deduplicate(all_documents)
+            _log_timing("去重处理", time.time() - step_start, f"{before_dedup} → {len(all_documents)} 条")
         
         # Step 4: Reranking
         if self.reranker:
+            step_start = time.time()
             all_documents = self.reranker.rerank(query, all_documents, self.config.final_k)
+            _log_timing("重排序", time.time() - step_start, f"保留 top-{self.config.final_k}")
         else:
             all_documents = all_documents[:self.config.final_k]
         
@@ -244,6 +265,7 @@ class EnhancedRAGRetriever:
             / self.retrieval_stats["total_queries"]
         )
         
+        _log_timing("检索总耗时", time.time() - total_start, f"最终 {final_count} 条文档")
         return all_documents
     
     def get_relevant_documents(self, query: str, **kwargs) -> List[Document]:
@@ -299,46 +321,110 @@ class EnhancedRAGRetriever:
         return self.retrieval_stats.copy()
 
 
-def build_enhanced_context(query: str, documents: List[Document], max_length: int = 8000) -> str:
-    """Build intelligently structured context from retrieved documents."""
-    if not documents:
-        return "No relevant context found."
+def _format_arknights_doc(doc: Document, index: int) -> str:
+    """Format Arknights document with specialized template.
     
-    # Group documents by source for better organization
-    source_groups = defaultdict(list)
-    for doc in documents:
-        source = doc.metadata.get('source', 'unknown')
-        source_groups[source].append(doc)
+    Args:
+        doc: The document to format
+        index: Document index number
+        
+    Returns:
+        Formatted document string
+    """
+    metadata = doc.metadata
+    doc_type = metadata.get('doc_type', 'general')
+    content = doc.page_content.strip()
+    
+    if doc_type == 'operator':
+        # Operator document format
+        rarity = metadata.get('rarity', '')
+        op_class = metadata.get('operator_class', '')
+        topic = metadata.get('topic', '')
+        
+        header_parts = [f"【干员档案 #{index}】"]
+        if topic:
+            header_parts.append(f"代号: {topic}")
+        if rarity:
+            header_parts.append(f"稀有度: {rarity}")
+        if op_class:
+            header_parts.append(f"职业: {op_class}")
+            
+        header = " | ".join(header_parts)
+        return f"{header}\n{content}\n"
+        
+    elif doc_type == 'story':
+        # Story document format
+        story_type = metadata.get('story_type', '')
+        chapter = metadata.get('chapter', '')
+        characters = metadata.get('characters', '')
+        topic = metadata.get('topic', '')
+        
+        header_parts = [f"【剧情档案 #{index}】"]
+        if topic:
+            header_parts.append(f"标题: {topic}")
+        if story_type:
+            type_map = {'mainline': '主线', 'event': '活动', 'character': '干员密录'}
+            header_parts.append(f"类型: {type_map.get(story_type, story_type)}")
+        if chapter:
+            header_parts.append(f"章节: {chapter}")
+        if characters:
+            header_parts.append(f"登场角色: {characters[:50]}")
+            
+        header = " | ".join(header_parts)
+        return f"{header}\n{content}\n"
+    
+    else:
+        # General document format
+        source = metadata.get('source', 'unknown')
+        category = metadata.get('category', 'general')
+        return f"[档案 #{index}] {category} | 来源: {source}\n{content}\n"
+
+
+def build_enhanced_context(query: str, documents: List[Document], max_length: int = 8000) -> str:
+    """Build intelligently structured context from retrieved documents.
+    
+    Includes specialized formatting for Arknights content (operators and stories).
+    """
+    if not documents:
+        return "[WARN] 罗德岛数据库中未找到相关记录。"
     
     context_parts = []
     current_length = 0
     
-    # Add query-focused instruction
-    header = f"Based on the following information, answer: {query}\n\n=== CONTEXT ===\n"
+    # PRTS-style header
+    header = f"[QUERY] 博士查询: {query}\n\n==== 罗德岛数据库检索结果 ====\n"
     context_parts.append(header)
     current_length += len(header)
     
-    # Process documents with priority weighting
+    # Count document types for summary
+    operator_count = sum(1 for d in documents if d.metadata.get('doc_type') == 'operator')
+    story_count = sum(1 for d in documents if d.metadata.get('doc_type') == 'story')
+    
+    if operator_count > 0 or story_count > 0:
+        summary = f"[INFO] 找到 {len(documents)} 条相关记录"
+        if operator_count > 0:
+            summary += f" (干员: {operator_count})"
+        if story_count > 0:
+            summary += f" (剧情: {story_count})"
+        context_parts.append(summary + "\n")
+        current_length += len(summary) + 1
+    
+    # Process documents with Arknights-specific formatting
     for i, doc in enumerate(documents, 1):
-        source = doc.metadata.get('source', 'unknown')
-        doc_type = doc.metadata.get('category', 'general')
-        
-        # Format with relevance indicators
-        doc_header = f"[Document {i}] {doc_type.upper()} | Source: {source}"
-        doc_content = doc.page_content.strip()
+        formatted_doc = _format_arknights_doc(doc, i)
         
         # Truncate if needed to fit max length
-        available_space = max_length - current_length - len(doc_header) - 50  # Buffer
+        available_space = max_length - current_length - 100  # Buffer
         if available_space <= 0:
+            context_parts.append(f"\n[WARN] 已截断，还有 {len(documents) - i + 1} 条记录未显示")
             break
             
-        if len(doc_content) > available_space:
-            doc_content = doc_content[:available_space] + "..."
+        if len(formatted_doc) > available_space:
+            formatted_doc = formatted_doc[:available_space] + "...\n"
         
-        formatted_doc = f"{doc_header}\n{doc_content}\n"
         context_parts.append(formatted_doc)
         current_length += len(formatted_doc)
     
-    context_parts.append("\n=== END CONTEXT ===")
+    context_parts.append("\n==== 检索结束 ====")
     
     return "\n".join(context_parts)

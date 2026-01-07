@@ -147,12 +147,21 @@ def main() -> None:
                 print(f"  Language: {args.language}")
             print("="*60 + "\n")
 
-        # Run RAG agent
+        # Run RAG agent with PRTS mode
         use_dual_output = not args.disable_dual_output
+        
+        # Determine system prompt: use None to enable default PRTS prompt
+        # unless user explicitly specified a custom prompt via -s or env var
+        default_prompt = "You are a helpful assistant for software development."
+        system_prompt = None if args.system == default_prompt else args.system
+        
+        if system_prompt is None:
+            print("✓ PRTS 模式已启用")
+        
         agent = RagAgent(
             llm=llm,
             retriever=retriever,
-            system_prompt=args.system,
+            system_prompt=system_prompt,
             compressor=compressor,
             enable_compression=args.enable_compression,
             session_id=args.session_id,

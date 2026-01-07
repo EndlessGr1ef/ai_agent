@@ -85,7 +85,11 @@ class BaseAgent(ABC):
         return count_tokens_in_messages(messages)
 
     def _parse_dual_output(self, response_text: str) -> Tuple[str, str]:
-        """Parse LLM response JSON into full answer and summary.
+        """Parse LLM response into full answer and summary.
+        
+        Supports two formats:
+        1. Tag format: [SUMMARY] summary text\\ncontent...
+        2. JSON format: {"summary": "...", "content": "..."}
 
         Args:
             response_text: Raw response from LLM
@@ -95,6 +99,17 @@ class BaseAgent(ABC):
         """
         import json
 
+        # First try tag format: [SUMMARY] xxx\n content...
+        summary_match = re.search(r'\[SUMMARY\]\s*(.+?)(?:\n|$)', response_text)
+        if summary_match:
+            summary = summary_match.group(1).strip()
+            # Content is everything after the summary line
+            content_start = summary_match.end()
+            content = response_text[content_start:].strip()
+            if content:
+                return content, summary
+        
+        # Fallback to JSON format
         try:
             # Try to extract JSON from markdown code blocks first
             json_match = re.search(r'```(?:json)?\n?({.*?})\n?```', response_text, re.DOTALL)
@@ -123,13 +138,11 @@ class BaseAgent(ABC):
                 else:
                     return response_text, self._extract_fallback_summary(response_text)
 
-            except json.JSONDecodeError as e:
-                print(f"\n[Warning] JSON parsing failed: {e}")
+            except json.JSONDecodeError:
                 return response_text, self._extract_fallback_summary(response_text)
 
-        except Exception as e:
+        except Exception:
             # If parsing fails, return full response as both
-            print(f"\n[Warning] Failed to parse dual output: {e}")
             return response_text, self._extract_fallback_summary(response_text)
 
     def _extract_fallback_summary(self, text: str) -> str:
@@ -270,6 +283,7 @@ class BaseAgent(ABC):
             List of response text chunks
         """
         import anthropic
+        import os
 
         # Convert LangChain messages to Anthropic format
         anthropic_messages = []
@@ -291,10 +305,17 @@ class BaseAgent(ABC):
 
         full_response = []
 
+        # Get model from environment
+        # Available models (via Anthropic-compatible API):
+        # - MiniMax-M2.1: faster (~60 tps), recommended (default)
+        # - MiniMax-M2: stable, has deep thinking
+        # - MiniMax-M2.1-lightning: fastest (~100 tps) but requires Coding Plan subscription
+        model_name = os.getenv("OPENAI_MODEL", "MiniMax-M2.1")
+        
         # Create stream using Anthropic SDK
         stream = self.llm.messages.create(
-            model="MiniMax-M2",
-            max_tokens=4000,
+            model=model_name,
+            max_tokens=1500,  # Reduced from 4000 for faster, more concise responses
             system=system_prompt,
             messages=anthropic_messages,
             temperature=temperature,
@@ -302,28 +323,34 @@ class BaseAgent(ABC):
         )
 
         for chunk in stream:
-            if chunk.type == "content_block_delta":
+            # Handle content block start (for tracking thinking vs text blocks)
+            if chunk.type == "content_block_start":
+                if hasattr(chunk, "content_block") and chunk.content_block:
+                    block_type = getattr(chunk.content_block, "type", "")
+                    # Could add logic here to track block state if needed
+                    pass
+            
+            # Handle content deltas (main content)
+            elif chunk.type == "content_block_delta":
                 if hasattr(chunk, "delta") and chunk.delta:
-                    if hasattr(chunk.delta, "type"):
-                        if chunk.delta.type == "thinking_delta":
-                            # Handle thinking content
-                            thinking_text = getattr(chunk.delta, 'thinking', '')
-                            if thinking_text:
-                                thinking_content, _ = self.stream_processor.process_chunk(f"<think>{thinking_text}</think>")
-                                if thinking_content:
-                                    self.output_formatter.print_thinking(thinking_content)
-                        elif chunk.delta.type == "text_delta":
-                            # Handle text content
-                            text_content = getattr(chunk.delta, 'text', '')
-                            if text_content:
-                                thinking_content, answer_content = self.stream_processor.process_chunk(text_content)
-
-                                if thinking_content:
-                                    self.output_formatter.print_thinking(thinking_content)
-
-                                if answer_content:
-                                    self.output_formatter.print_answer(answer_content)
-                                    full_response.append(answer_content)
+                    delta_type = getattr(chunk.delta, "type", "")
+                    
+                    if delta_type == "thinking_delta":
+                        # Handle thinking content - just track, don't display
+                        thinking_text = getattr(chunk.delta, 'thinking', '')
+                        if thinking_text:
+                            # Silently accumulate thinking (not displayed to user)
+                            pass
+                            
+                    elif delta_type == "text_delta":
+                        # Handle text content - display to user
+                        text_content = getattr(chunk.delta, 'text', '')
+                        if text_content:
+                            # Process and display answer content
+                            _, answer_content = self.stream_processor.process_chunk(text_content)
+                            if answer_content:
+                                self.output_formatter.print_answer(answer_content)
+                                full_response.append(answer_content)
 
         return full_response
 
@@ -365,7 +392,7 @@ class BaseAgent(ABC):
         """
         current_tokens = self._count_tokens(messages)
         used_percent = current_tokens / max_tokens * 100
-        print(f"[Info] Total tokens: {current_tokens:,} / {max_tokens:,} ({used_percent:.1f}% of limit)")
+        print(f"[STATUS] Token使用: {current_tokens:,} / {max_tokens:,} ({used_percent:.1f}%)")
 
     def _retrieve_memories(self, query: str) -> str:
         """Retrieve relevant memories and format as context.

@@ -1,6 +1,7 @@
 """RAG agent implementation with simplified enhanced retrieval."""
 
 import os
+import time
 import anthropic
 from typing import List, Optional, Union, Dict, Any
 
@@ -13,44 +14,50 @@ from agents.base_agent import BaseAgent
 from rag.enhanced_retrieval import (
     EnhancedRAGRetriever, 
     RetrievalConfig, 
-    build_enhanced_context
+    build_enhanced_context,
+    _log_timing,
+    ENABLE_TIMING
 )
 
 
 class RagAgent(BaseAgent):
     """RAG-enabled agent for retrieval-based conversations."""
 
-    # PRTS system prompt for Arknights-style responses
-    PRTS_SYSTEM_PROMPT = """你是PRTS（Pre-stage Rhodesia Tactical System），罗德岛的中央数据库和战术系统，博士的专属AI助手。你拥有罗德岛所有干员、作战记录、医疗数据和战术信息的访问权限。
+    # PRTS dual output prompt - combines PRTS personality with streaming-friendly format
+    PRTS_DUAL_OUTPUT_PROMPT = """你是PRTS（Pre-stage Rhodesia Tactical System），罗德岛的中央数据库和战术系统，博士的专属AI助手。
 
-## 回答格式要求
-所有回答都必须采用命令行终端格式输出，包含：
-- 系统提示符：`[PRTS]$`
-- 状态指示器：`[INFO]`、`[AUTH]`、`[QUERY]`、`[STATUS]`等
-- 数据查询过程模拟
-- 结构化信息输出
-- 系统日志风格的响应
-
-## 基础查询回答格式：
-```
-[PRTS]$ 正在处理查询请求...
-[INFO] 连接数据库... 完成
-[INFO] 验证博士权限... 通过
-[INFO] 搜索相关数据... 
-
-==== 查询结果 ====
-[数据内容]
-
-[STATUS] 查询完成 | 耗时: 0.23s | 数据完整性: 100%
-[PRTS]$ 还有其他需要查询的信息吗，博士？
-```
-
-## 语言特点
-- 使用正式但亲近的语气，体现AI助手的专业性
+## 人格设定
 - 始终称呼用户为"博士"
+- 使用正式但亲近的语气
 - 保持系统化、数据化的回答风格
-- 在适当时候表现出对博士的关心和支持
-- 模拟真实的数据库查询延迟和状态更新"""
+
+## 回答原则（重要）
+1. **简洁优先**：优先用最简洁的方式回答，避免冗长
+2. **聚焦核心**：只回答问的问题，不过度展开
+3. **精简数据**：干员信息只列出关键属性，剧情只概述要点
+4. **控制长度**：一般回答控制在200字以内，复杂问题不超过400字
+
+## 输出格式（必须严格遵循）
+回答必须以 [SUMMARY] 标记开头，包含1句话总结，然后换行输出正文：
+
+[SUMMARY] 一句话总结（用于记忆检索）
+正文内容...
+
+## 正文格式
+- 使用状态指示器：[INFO]、[STATUS]、[WARN]
+- 使用结构化格式：【标题】内容
+- 结尾询问是否需要更多信息
+
+## 示例
+[SUMMARY] 博士查询阿米娅的职业信息
+[INFO] 检索干员档案: 阿米娅
+
+【阿米娅】5★术师
+• 类型: 术战者（近卫形态可造成法术伤害）
+• 定位: 罗德岛领袖，核心输出干员
+
+[STATUS] 查询完成
+需要了解更多详情吗，博士？"""
 
     def __init__(
         self,
@@ -72,7 +79,7 @@ class RagAgent(BaseAgent):
         Args:
             llm: The language model to use (ChatOpenAI or Anthropic client)
             retriever: The base retriever to use (will be wrapped with EnhancedRAGRetriever)
-            system_prompt: The system prompt to use (defaults to dual output if use_dual_output=True)
+            system_prompt: The system prompt to use (defaults to PRTS dual output prompt)
             compressor: The context compressor instance
             enable_compression: Whether to enable context compression
             session_id: Optional session ID for memory persistence
@@ -82,15 +89,16 @@ class RagAgent(BaseAgent):
             use_anthropic_sdk: Whether to use Anthropic SDK
             retrieval_config: Configuration for enhanced retrieval system
         """
-        # Get system prompt from environment variable or use default
+        # Default to PRTS dual output prompt (combines PRTS personality with JSON format)
         if system_prompt is None:
-            # Try to get from environment variable, fallback to PRTS prompt
-            env_prompt = os.getenv("OPENAI_SYSTEM_PROMPT", self.PRTS_SYSTEM_PROMPT)
-            if use_dual_output and env_prompt == self.PRTS_SYSTEM_PROMPT:
-                # If using PRTS prompt but dual output is enabled, use dual output format
-                system_prompt = self.DUAL_OUTPUT_SYSTEM_PROMPT
-            else:
+            # Check environment variable first, fallback to PRTS dual output prompt
+            env_prompt = os.getenv("OPENAI_SYSTEM_PROMPT")
+            if env_prompt:
+                # User specified custom prompt via environment
                 system_prompt = env_prompt
+            else:
+                # Use PRTS dual output prompt by default
+                system_prompt = self.PRTS_DUAL_OUTPUT_PROMPT
 
         super().__init__(
             llm,
@@ -108,7 +116,7 @@ class RagAgent(BaseAgent):
         self.retrieval_config = retrieval_config or RetrievalConfig()
         self.enhanced_retriever = EnhancedRAGRetriever(retriever, self.retrieval_config)
         self.retriever = self.enhanced_retriever
-        print("✓ Enhanced RAG retrieval system enabled")
+        print("[INFO] 增强检索系统: 已启用")
         
         self.use_dual_output = use_dual_output
 
@@ -122,32 +130,32 @@ class RagAgent(BaseAgent):
             The built context string with enhanced formatting
         """
         try:
-            # Always use enhanced retriever
+            # Always use enhanced retriever (timing is handled inside retrieve())
             retrieved = self.enhanced_retriever.retrieve(user_input)
             
-            # Build enhanced context
+            # Build enhanced context with PRTS-style formatting
+            step_start = time.time()
             context = build_enhanced_context(
                 user_input, 
                 retrieved, 
                 max_length=self.retrieval_config.max_context_length
             )
+            _log_timing("上下文构建", time.time() - step_start, f"{len(context)} 字符")
             
-            # Add instructions for enhanced context
+            # Add PRTS-style instructions
             prompt_with_context = (
                 f"{context}\n\n"
-                f"Instructions: Provide a comprehensive answer based on the context above. "
-                f"Reference specific sources when possible. "
-                f"If information is insufficient, clearly state what's missing."
+                f"[PRTS指令] 基于上述罗德岛数据库检索结果回答博士的问题。"
+                f"在回答中引用具体的档案来源。"
+                f"如果信息不足，使用[WARN]明确说明缺失内容。"
             )
                 
         except Exception as e:
-            print(f"⚠️  Retrieval error: {e}")
+            print(f"[ERROR] 检索失败: {e}")
             # Fallback to basic context
-            context = f"Error in retrieval: {str(e)}"
             prompt_with_context = (
-                f"Question: {user_input}\n\n"
-                f"Note: There was an issue with document retrieval. "
-                f"Please answer based on your general knowledge."
+                f"[QUERY] 博士查询: {user_input}\n\n"
+                f"[WARN] 罗德岛数据库检索遇到问题，请基于已知信息回答。"
             )
 
         return prompt_with_context
@@ -157,11 +165,17 @@ class RagAgent(BaseAgent):
         messages: List = [SystemMessage(content=self.system_prompt)]
         max_tokens = 80000  # Default max tokens for display
 
-        print("\n===== LangChain RAG Agent (interactive) =====")
-        print("Tip: type /exit or /quit to exit; type /reset to clear screen.")
+        # PRTS style welcome message
+        print("\n" + "="*60)
+        print("[PRTS] 罗德岛战术终端系统 v2.0")
+        print("[INFO] 系统初始化完成")
+        print("[INFO] 数据库连接: 就绪")
+        print("[INFO] 博士权限验证: 通过")
+        print("="*60)
+        print("[PRTS]$ 输入 /exit 或 /quit 退出 | /reset 清空上下文")
 
         if self.enable_compression and self.compressor:
-            print("✓ Context compression enabled")
+            print("[INFO] 上下文压缩: 已启用")
             max_tokens = self.compressor.max_tokens
         print()
 
@@ -177,34 +191,34 @@ class RagAgent(BaseAgent):
                     messages.append(AIMessage(content=assistant_msg))
                     turn_counter += 1
                 if history:
-                    print(f"[Info] Loaded {len(history)} previous conversation turns from session '{self.session_id}'")
+                    print(f"[INFO] 已加载 {len(history)} 条历史会话记录 (会话: {self.session_id})")
             except Exception as e:
                 self.output_formatter.print_error(f"Failed to load session history: {e}")
 
         while True:
             try:
-                user_input = input("You: ").strip()
+                user_input = input("博士: ").strip()
             except (KeyboardInterrupt, EOFError):
-                print("\n[Info] Exited.")
+                print("\n[STATUS] 会话终止")
                 if compression_counter > 0:
-                    print(f"[Info] Total compressions performed: {compression_counter}")
+                    print(f"[INFO] 压缩次数: {compression_counter}")
                 self._print_token_stats(messages, max_tokens)
                 break
 
             if not user_input:
                 continue
             if user_input.lower() in {"/exit", "/quit"}:
-                print("[Info] Bye!")
+                print("[STATUS] 再见，博士。期待您的下次访问。")
                 if compression_counter > 0:
-                    print(f"[Info] Total compressions performed: {compression_counter}")
+                    print(f"[INFO] 压缩次数: {compression_counter}")
                 self._print_token_stats(messages, max_tokens)
                 break
             if user_input.lower() == "/reset":
                 messages = [SystemMessage(content=self.system_prompt)]
                 compression_counter = 0
                 os.system("clear")
-                print("\n===== LangChain RAG Agent (interactive) =====")
-                print("Context cleared.")
+                print("\n[PRTS] 罗德岛战术终端系统")
+                print("[INFO] 上下文已清空")
                 continue
 
             # RAG query
@@ -225,8 +239,10 @@ class RagAgent(BaseAgent):
                 # Add user input to message list
                 messages.append(HumanMessage(content=prompt_with_context))
 
-                # Process the request
+                # Process the request with timing
+                llm_start = time.time()
                 raw_response = self._process_streaming(messages, max_tokens)
+                _log_timing("LLM生成", time.time() - llm_start, f"{len(raw_response)} 字符")
 
                 # Parse dual output if enabled
                 if self.use_dual_output:
@@ -273,10 +289,10 @@ class RagAgent(BaseAgent):
         try:
             self.chat_loop()
         finally:
-            # Print retrieval statistics on exit
+            # Print retrieval statistics on exit (PRTS style)
             if self.use_enhanced_retrieval:
                 stats = self.get_retrieval_stats()
-                print(f"\n📊 Retrieval Statistics:")
-                print(f"   Total queries: {stats.get('total_queries', 0)}")
-                print(f"   Avg docs retrieved: {stats.get('avg_final_results', 0):.1f}")
-                print(f"   Reranking enabled: {stats.get('reranking_enabled', False)}")
+                print(f"\n[STATUS] 会话统计")
+                print(f"  查询次数: {stats.get('total_queries', 0)}")
+                print(f"  平均检索文档: {stats.get('avg_final_results', 0):.1f}")
+                print(f"  重排序: {'启用' if stats.get('reranking_enabled', False) else '禁用'}")
