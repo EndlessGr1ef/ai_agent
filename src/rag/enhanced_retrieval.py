@@ -34,9 +34,9 @@ class RetrievalConfig:
     # Embedding settings
     embedding_model: str = os.getenv('EMBED_MODEL_NAME', 'BAAI/bge-large-zh-v1.5')  # 默认使用中文优化模型
     
-    # Retrieval parameters - optimized for speed and conciseness
-    initial_k: int = 4   # Reduced from 8 for faster retrieval
-    final_k: int = 2     # Reduced from 4 for more focused context
+    # Retrieval parameters - balanced for recall and precision
+    initial_k: int = 10  # Increased for better recall
+    final_k: int = 5     # Increased for more comprehensive context
     similarity_threshold: float = 0.7
     
     # Reranking settings
@@ -47,10 +47,14 @@ class RetrievalConfig:
     enable_query_expansion: bool = True
     enable_query_rewrite: bool = False  # Disabled for faster queries
     
-    # Context building - reduced for concise responses
-    max_context_length: int = 4000  # Reduced from 8000
+    # Context building - expanded for more documents
+    max_context_length: int = 6000  # Increased from 4000 to accommodate more results
     enable_deduplication: bool = True
     similarity_dedup_threshold: float = 0.85
+    
+    # Distilled content prioritization
+    prefer_distilled: bool = True  # Prioritize distilled (refined) content
+    distilled_ratio: float = 0.6   # Target ratio of distilled content (60% distilled + 40% raw)
 
 
 class QueryEnhancer:
@@ -138,6 +142,40 @@ class ContentDeduplicator:
         
         return intersection / union if union > 0 else 0.0
     
+    def deduplicate_by_topic(self, documents: List[Document]) -> List[Document]:
+        """
+        Deduplicate by topic, prioritizing distilled versions.
+        
+        Logic:
+        - If the same topic has both distilled and raw versions, keep only distilled
+        - Otherwise, maintain existing deduplication logic
+        
+        Args:
+            documents: List of documents to deduplicate
+            
+        Returns:
+            List of deduplicated documents with distilled versions prioritized
+        """
+        if len(documents) <= 1:
+            return documents
+            
+        topic_map = {}
+        for doc in documents:
+            topic = doc.metadata.get('topic', 'unknown')
+            is_distilled = doc.metadata.get('is_distilled') == 'true'
+            
+            if topic not in topic_map:
+                topic_map[topic] = doc
+            elif is_distilled and topic_map[topic].metadata.get('is_distilled') != 'true':
+                # Distilled version takes priority
+                topic_map[topic] = doc
+            elif not is_distilled and topic_map[topic].metadata.get('is_distilled') != 'true':
+                # Both are raw, keep the first one (already in map)
+                pass
+            # If existing is distilled and new is raw, keep existing (do nothing)
+        
+        return list(topic_map.values())
+    
     def deduplicate(self, documents: List[Document]) -> List[Document]:
         """Remove similar documents based on content similarity."""
         if len(documents) <= 1:
@@ -204,8 +242,10 @@ class EnhancedRAGRetriever:
         # Copy search_kwargs from base retriever if it exists
         if hasattr(base_retriever, 'search_kwargs'):
             self.search_kwargs = base_retriever.search_kwargs.copy()
+            # Ensure base_retriever uses initial_k
+            self.base_retriever.search_kwargs['k'] = self.config.initial_k
         else:
-            self.search_kwargs = {"k": self.config.k}
+            self.search_kwargs = {"k": self.config.initial_k}
         
         # Initialize components
         self.query_enhancer = QueryEnhancer()
@@ -222,6 +262,9 @@ class EnhancedRAGRetriever:
     
     def retrieve(self, query: str, **kwargs) -> List[Document]:
         """Enhanced retrieval with query processing and reranking."""
+        if self.base_retriever is None:
+            return []
+            
         total_start = time.time()
         self.retrieval_stats["total_queries"] += 1
         
@@ -230,12 +273,27 @@ class EnhancedRAGRetriever:
         enhanced_queries = self._enhance_query(query)
         _log_timing("查询增强", time.time() - step_start, f"生成 {len(enhanced_queries)} 个查询变体")
         
-        # Step 2: Retrieve from multiple query variants
+        # Step 2: Retrieve from multiple query variants with priority handling
         step_start = time.time()
         all_documents = []
-        for enhanced_query in enhanced_queries:
-            docs = self._retrieve_base(enhanced_query, **kwargs)
-            all_documents.extend(docs)
+        
+        if self.config.prefer_distilled:
+            # Use priority retrieval: distilled first, then raw
+            for enhanced_query in enhanced_queries:
+                docs = self._retrieve_with_priority(enhanced_query, self.config.initial_k, **kwargs)
+                all_documents.extend(docs)
+        else:
+            # Original logic: no priority
+            # Ensure k is set to initial_k
+            if hasattr(self.base_retriever, 'search_kwargs'):
+                self.base_retriever.search_kwargs['k'] = self.config.initial_k
+            elif hasattr(self.base_retriever, 'k'):
+                self.base_retriever.k = self.config.initial_k
+                
+            for enhanced_query in enhanced_queries:
+                docs = self._retrieve_base(enhanced_query, **kwargs)
+                all_documents.extend(docs)
+        
         _log_timing("向量检索", time.time() - step_start, f"检索到 {len(all_documents)} 条文档")
         
         initial_count = len(all_documents)
@@ -244,11 +302,17 @@ class EnhancedRAGRetriever:
             / self.retrieval_stats["total_queries"]
         )
         
-        # Step 3: Deduplication
+        # Step 3: Deduplication (enhanced with topic-based dedup)
         if self.config.enable_deduplication:
             step_start = time.time()
             before_dedup = len(all_documents)
+            
+            # First: deduplicate by topic (prioritizes distilled)
+            all_documents = self.deduplicator.deduplicate_by_topic(all_documents)
+            
+            # Second: deduplicate by content similarity
             all_documents = self.deduplicator.deduplicate(all_documents)
+            
             _log_timing("去重处理", time.time() - step_start, f"{before_dedup} → {len(all_documents)} 条")
         
         # Step 4: Reranking
@@ -287,31 +351,92 @@ class EnhancedRAGRetriever:
         
         return queries[:3]  # Limit to prevent too many queries
     
-    def _retrieve_base(self, query: str, **kwargs) -> List[Document]:
-        """Retrieve using base retriever."""
-        # Update search kwargs with initial_k
-        search_kwargs = kwargs.copy()
-        search_kwargs['k'] = self.config.initial_k
+    def _retrieve_with_priority(self, query: str, target_k: int, **kwargs) -> List[Document]:
+        """
+        Retrieve with distilled content prioritization.
         
-        try:
-            # Try different methods based on retriever type
-            if hasattr(self.base_retriever, 'get_relevant_documents'):
-                # LangChain retriever
-                original_k = getattr(self.base_retriever, 'k', None)
-                if hasattr(self.base_retriever, 'k'):
-                    self.base_retriever.k = self.config.initial_k
+        Strategy:
+        1. First retrieve distilled versions (is_distilled=true)
+        2. If results are insufficient, supplement with raw versions (is_distilled=false)
+        3. Deduplicate by topic, keeping distilled versions
+        
+        Args:
+            query: Query text
+            target_k: Target number of results
+            **kwargs: Additional retrieval arguments
+            
+        Returns:
+            Merged document list with distilled content prioritized
+        """
+        all_documents = []
+        
+        # Step 1: Retrieve distilled versions first
+        distilled_k = max(int(target_k * self.config.distilled_ratio), 1)  # At least 1
+        
+        if hasattr(self.base_retriever, 'search_kwargs'):
+            orig_search_kwargs = self.base_retriever.search_kwargs.copy()
+            
+            # Add is_distilled filter
+            distilled_filter = {"is_distilled": "true"}
+            if 'filter' in orig_search_kwargs:
+                # Merge with existing filter
+                distilled_filter.update(orig_search_kwargs['filter'])
+            
+            self.base_retriever.search_kwargs['k'] = distilled_k
+            self.base_retriever.search_kwargs['filter'] = distilled_filter
+            
+            try:
+                distilled_docs = self._retrieve_base(query)
+                all_documents.extend(distilled_docs)
+                _log_timing("提炼版检索", 0, f"检索到 {len(distilled_docs)} 条")
+            except Exception as e:
+                logger.warning(f"Distilled retrieval failed: {e}")
+            
+            # Step 2: If insufficient, retrieve raw versions to supplement
+            if len(all_documents) < target_k:
+                remaining_k = target_k - len(all_documents)
+                raw_filter = {"is_distilled": "false"}
+                if 'filter' in orig_search_kwargs:
+                    # Merge with original filter (excluding is_distilled)
+                    for key, value in orig_search_kwargs['filter'].items():
+                        if key != 'is_distilled':
+                            raw_filter[key] = value
+                
+                self.base_retriever.search_kwargs['k'] = remaining_k
+                self.base_retriever.search_kwargs['filter'] = raw_filter
+                
                 try:
-                    results = self.base_retriever.get_relevant_documents(query)
-                finally:
-                    if original_k is not None:
-                        self.base_retriever.k = original_k
-                return results
-            elif hasattr(self.base_retriever, 'invoke'):
-                # Runnable interface
+                    raw_docs = self._retrieve_base(query)
+                    all_documents.extend(raw_docs)
+                    _log_timing("原始版补充", 0, f"补充 {len(raw_docs)} 条")
+                except Exception as e:
+                    logger.warning(f"Raw retrieval failed: {e}")
+            
+            # Restore original search_kwargs
+            self.base_retriever.search_kwargs = orig_search_kwargs
+        else:
+            # Fallback: retrieve without filter
+            logger.warning("Base retriever doesn't support search_kwargs, falling back to unfiltered retrieval")
+            all_documents = self._retrieve_base(query, **kwargs)
+        
+        return all_documents
+    
+    def _retrieve_base(self, query: str, **kwargs) -> List[Document]:
+        """
+        Low-level retrieval call with API compatibility handling.
+        Does not modify retriever state (like k or filters).
+        """
+        try:
+            # Step 1: Try modern LangChain invoke method (preferred)
+            if hasattr(self.base_retriever, 'invoke'):
                 return self.base_retriever.invoke(query)
-            else:
-                # Fallback: assume it's callable
-                return self.base_retriever(query)
+            
+            # Step 2: Try legacy get_relevant_documents method
+            if hasattr(self.base_retriever, 'get_relevant_documents'):
+                return self.base_retriever.get_relevant_documents(query)
+            
+            # Step 3: Fallback to assume it's callable
+            return self.base_retriever(query)
         except Exception as e:
             logger.error(f"Error in base retriever: {e}")
             return []

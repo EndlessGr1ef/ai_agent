@@ -6,9 +6,10 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Callable
 
-from utils.token_counter import count_tokens_in_messages
-from utils.reasoning import extract_reasoning_details
-from utils.arg_parser import parse_args
+# Lazy imports to avoid circular dependencies and optional dependencies
+# from .token_counter import count_tokens_in_messages
+# from .reasoning import extract_reasoning_details
+# from .arg_parser import parse_args
 
 
 # -----------------------------
@@ -149,9 +150,9 @@ def build_web_search_tool() -> Tool:
 
 
 __all__ = [
-    'count_tokens_in_messages',
-    'extract_reasoning_details',
-    'parse_args',
+    # 'count_tokens_in_messages',
+    # 'extract_reasoning_details',
+    # 'parse_args',
     'Tool',
     'ToolResult',
     'ToolRegistry',

@@ -24,7 +24,7 @@ class RagAgent(BaseAgent):
     """RAG-enabled agent for retrieval-based conversations."""
 
     # PRTS dual output prompt - combines PRTS personality with streaming-friendly format
-    PRTS_DUAL_OUTPUT_PROMPT = """你是PRTS（Pre-stage Rhodesia Tactical System），罗德岛的中央数据库和战术系统，博士的专属AI助手。
+    PRTS_DUAL_OUTPUT_PROMPT = """你是PRTS（Primitive Rhodes Island Terminal Service），罗德岛的中央数据库和战术系统，博士的专属AI助手。
 
 ## 人格设定
 - 始终称呼用户为"博士"
@@ -111,12 +111,20 @@ class RagAgent(BaseAgent):
             use_anthropic_sdk
         )
         
-        # Setup enhanced retrieval system (always enabled)
+        # Setup enhanced retrieval system
         self.use_enhanced_retrieval = True
-        self.retrieval_config = retrieval_config or RetrievalConfig()
-        self.enhanced_retriever = EnhancedRAGRetriever(retriever, self.retrieval_config)
+        
+        # Check if retriever is already an EnhancedRAGRetriever
+        if isinstance(retriever, EnhancedRAGRetriever):
+            self.enhanced_retriever = retriever
+            self.retrieval_config = retriever.config
+        else:
+            # Wrap the base retriever
+            self.retrieval_config = retrieval_config or RetrievalConfig()
+            self.enhanced_retriever = EnhancedRAGRetriever(retriever, self.retrieval_config)
+            
         self.retriever = self.enhanced_retriever
-        print("[INFO] 增强检索系统: 已启用")
+        print(f"[INFO] RAG系统初始化完成 (k: {self.retrieval_config.initial_k} → {self.retrieval_config.final_k})")
         
         self.use_dual_output = use_dual_output
 
@@ -163,7 +171,7 @@ class RagAgent(BaseAgent):
     def chat_loop(self):
         """Run the interactive RAG chat loop."""
         messages: List = [SystemMessage(content=self.system_prompt)]
-        max_tokens = 80000  # Default max tokens for display
+        max_tokens = 10000  # Default max tokens for display
 
         # PRTS style welcome message
         print("\n" + "="*60)
@@ -221,7 +229,22 @@ class RagAgent(BaseAgent):
                 print("[INFO] 上下文已清空")
                 continue
 
-            # RAG query
+            # 1) Try explicit command handling
+            if self._try_handle_command(user_input):
+                # command handled: do not send to LLM
+                continue
+
+            # 2) Intent classification and tool routing
+            route = self._classify_intent(user_input)
+            summary = None
+            if route and route.get('tool_name'):
+                # append user first for context
+                messages.append(HumanMessage(content=user_input))
+                summary = self._route_and_execute_tool(route)
+                if summary:
+                    messages.append(AIMessage(content=summary))
+            
+            # 3) RAG query
             try:
                 # Retrieve relevant documents and build context
                 prompt_with_context = self._retrieve_and_build_context(user_input)
@@ -237,6 +260,7 @@ class RagAgent(BaseAgent):
                         )
 
                 # Add user input to message list
+                # If tool was executed, prompt_with_context is a follow-up
                 messages.append(HumanMessage(content=prompt_with_context))
 
                 # Process the request with timing

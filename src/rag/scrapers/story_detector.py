@@ -293,10 +293,14 @@ class StoryPageDetector:
         tables = soup.find_all('table')
 
         for table_idx, table in enumerate(tables):
-            # 获取table的文本内容，检查是否包含我们要的分类
+            # 获取table的文本内容，检查是否包含可能的一览关键词
             table_text = table.get_text()
-            if '主线剧情一览' not in table_text and '活动剧情一览' not in table_text:
-                continue
+            # 更加宽松的检查：只要是表格，且包含一些剧情或列表相关的词
+            if not any(keyword in table_text for keyword in ['剧情', '一览', '密录', '记录', 'Episode', 'Chapter', '档案', '回顾']):
+                # 如果没有关键词，但行数很多且包含不少链接，也可能是我们想要的
+                rows = table.find_all('tr')
+                if len(rows) < 5:
+                    continue
 
             # 检查table的列数，如果列数过多（如37列），可能是复杂的表头，跳过
             first_tr = table.find('tr')
@@ -318,7 +322,7 @@ class StoryPageDetector:
                     th_texts = [self._clean_category_name(th.get_text(strip=True)) for th in th_tags]
                     # 检查是否包含顶级分类
                     if any(keyword in text for text in th_texts
-                           for keyword in ['主线剧情一览', '活动剧情一览', '支线剧情一览']):
+                           for keyword in ['剧情', '一览', '密录', '记录', '情报']):
                         top_category_row = tr
                         top_category_path = th_texts
                         break
@@ -394,6 +398,23 @@ class StoryPageDetector:
             if link_info['url'] not in seen_urls:
                 seen_urls.add(link_info['url'])
                 unique_links.append(link_info)
+
+        # 🚀 增加兜底逻辑：如果没找到带分类的链接，但页面确实有很多剧情链接，则提取不带分类的链接
+        if not unique_links:
+            all_links = soup.find_all('a', href=True)
+            for link in all_links:
+                href = link.get('href')
+                if not href or not href.startswith('/w/'):
+                    continue
+                full_url = urljoin(base_url, href)
+                if self._is_potential_story_link(full_url):
+                    if full_url not in seen_urls:
+                        seen_urls.add(full_url)
+                        unique_links.append({
+                            'url': full_url,
+                            'category_path': ('其他',),
+                            'title': link.get_text(strip=True)
+                        })
 
         # 按分类路径排序
         return sorted(unique_links, key=lambda x: (x['category_path'], x['url']))
@@ -515,7 +536,7 @@ class StoryPageDetector:
         story_keywords = [
             '剧情', '故事', '活动', 'ENTRY', 'BEG', 'END',
             '主线', 'Side', 'Worldview', '世界观',
-            'Event', 'Episode'
+            'Event', 'Episode', '干员密录', '干员剧情', '档案', '密录'
         ]
 
         # 检查URL路径

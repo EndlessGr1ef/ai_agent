@@ -14,9 +14,10 @@ from .optimized_retrieval_config import (
 
 # Import enhanced retrieval if available (optional dependency)
 try:
-    from ..rag.enhanced_retrieval import EnhancedRAGRetriever, RetrievalConfig
+    from rag.enhanced_retrieval import EnhancedRAGRetriever, RetrievalConfig
     ENHANCED_AVAILABLE = True
-except Exception:
+except Exception as e:
+    print(f"DEBUG: Enhanced retrieval import failed: {e}")
     ENHANCED_AVAILABLE = False
 
 
@@ -33,7 +34,10 @@ def build_retriever(
     # Enhanced parameters
     use_enhanced: bool = True,
     config_profile: str = "balanced",
-    custom_config: Optional[OptimizedRetrievalConfig] = None
+    custom_config: Optional[OptimizedRetrievalConfig] = None,
+    # Distilled content prioritization
+    prefer_distilled: bool = True,
+    distilled_ratio: float = 0.6
 ):
     """
     Create an enhanced retriever backed by Chroma collection with optional optimization.
@@ -51,6 +55,8 @@ def build_retriever(
         use_enhanced: Whether to use enhanced retrieval system
         config_profile: Configuration profile ('performance', 'quality', 'balanced')
         custom_config: Custom retrieval configuration (overrides profile)
+        prefer_distilled: Prioritize distilled (refined) content over raw content
+        distilled_ratio: Target ratio of distilled content (default: 0.6 = 60% distilled)
     
     Returns:
         Enhanced retriever if available, otherwise basic retriever
@@ -99,10 +105,15 @@ def build_retriever(
             enable_query_rewrite=opt_config.enable_query_rewriting,
             max_context_length=opt_config.max_context_tokens,
             enable_deduplication=opt_config.enable_deduplication,
-            similarity_dedup_threshold=opt_config.content_similarity_threshold
+            similarity_dedup_threshold=opt_config.content_similarity_threshold,
+            # Distilled content prioritization
+            prefer_distilled=prefer_distilled,
+            distilled_ratio=distilled_ratio
         )
         
         print(f"✓ Enhanced retriever initialized with '{config_profile}' profile")
+        if prefer_distilled:
+            print(f"  ➜ Distilled content priority enabled (ratio: {distilled_ratio:.0%})")
         return EnhancedRAGRetriever(base_retriever, retrieval_config)
     else:
         # Use basic configuration

@@ -6,6 +6,7 @@ import asyncio
 import os
 import logging
 import time
+import re
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
@@ -101,8 +102,22 @@ class StoryScraper(BaseScraper):
         browser = await self.get_browser()
         page = await browser.new_page()
         try:
-            await page.goto(url, wait_until='domcontentloaded', timeout=30000)
-            # 直接获取HTML，无需等待JavaScript（页面无脚本元素）
+            # 对于一览页面，可能需要等待JavaScript渲染
+            is_list_page = any(keyword in url for keyword in ['一览', 'list', '情报处理室'])
+            
+            if is_list_page:
+                await page.goto(url, wait_until='networkidle', timeout=60000)
+                # 等待可能的动态内容加载（Vue组件）
+                # 尝试等待常见的表格或列表元素
+                try:
+                    await page.wait_for_selector('table, .mw-parser-output', timeout=10000)
+                    # 额外等待一段时间确保Vue组件完成渲染
+                    await asyncio.sleep(3)
+                except:
+                    pass
+            else:
+                await page.goto(url, wait_until='domcontentloaded', timeout=30000)
+            
             html = await page.content()
             return html
         except Exception as e:
@@ -185,9 +200,7 @@ class StoryScraper(BaseScraper):
 
             if cached_title:
                 # 使用缓存的title生成文件名
-                from pathlib import Path
                 title = cached_title
-                import re
                 # 清理文件名（与 _generate_filename 保持一致）
                 title = re.sub(r'[<>:"/\\|?*]', '_', title)
                 title = title.strip(' .')
@@ -564,8 +577,6 @@ class StoryScraper(BaseScraper):
         Returns:
             str: 文件名
         """
-        import re
-
         # 提取标题
         title = story_data.get('title', '未知剧情')
 

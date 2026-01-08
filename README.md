@@ -1,353 +1,121 @@
-# AI Agent - 模块化 LLM agent系统
+# PRTS AI Agent - 罗德岛战术系统
 
-一个功能完整的命令行 RAG Agent，支持 ChromaDB 向量检索、上下文压缩、实时流式输出和思考过程显示。
+一个基于 LangChain 和 ChromaDB 构建的模块化 LLM Agent 系统，专门模拟《明日方舟》中的 **PRTS (Primitive Rhodes Island Terminal Service)**。
 
 ## ✨ 核心特性
 
-### 🚀 基础功能
-- **流式输出**：实时显示 AI 思考过程和回答内容
-- **思考可见**：`[thinking]` 和 `[answers]` 标签清晰展示推理过程
-- **Token 统计**：实时显示 token 使用量和百分比
-- **上下文压缩**：智能压缩长对话，节省 60-80% 成本
+### 🤖 智能代理 (Agent)
+- **PRTS 终端主题**：深度还原明日方舟终端风格，支持 `[PRTS]$`, `[INFO]`, `[STATUS]` 等状态提示。
+- **双重输出格式**：自动生成 `summary`（存入记忆）和 `content`（面向博士），优化长对话性能。
+- **流式输出 & 思考可见**：实时显示 `[thinking]` 过程，让博士清晰了解 PRTS 的推理逻辑。
+- **上下文智能压缩**：使用本地 Transformer 模型，减少 60-80% 的历史长度，大幅降低 token 成本。
+- **会话持久化记忆**：基于向量检索的长期记忆，跨会话关联博士的查询历史。
 
-### 🔍 检索增强 (RAG)
-- **ChromaDB 集成**：基于向量相似度的语义检索
-- **智能分类**：自动文档分类入库
-- **多维过滤**：支持按分类、主题、语言等维度过滤
-- **检索统计**：显示检索到的文档数量和相关度
+### 🔍 检索增强 (RAG) & 数据库管理
+- **PRTS DB CLI** ⭐：一站式交互式 CLI 工具（`python prts_db_cli.py`），集成查询、入库、提炼、删除功能。
+- **知识提炼 (Distillation)**：利用 LLM 自动将冗长的百科文档提炼为核心知识点，提升检索效率。
+- **统一向量存储**：支持原始版（Raw）与提炼版（Distilled）文档共存，支持优先检索精炼内容。
+- **多维元数据过滤**：精准过滤干员职业、星级、稀有度、剧情章节等属性。
 
-### 📊 数据管理
-- **自动入库**：批量读取 Markdown 文档并自动分类
-- **交互式查询**：提供 ChromaDB 交互式查询工具
-- **元数据丰富**：自动提取并存储分类、主题、编程语言等标签
-
-### 💾 会话记忆管理
-- **持久化记忆**：基于 ChromaDB 的会话记忆存储
-- **语义检索**：自动检索相关历史对话
-- **跨会话支持**：支持多个独立会话的并行管理
-- **智能回顾**：自动整合相关历史上下文到当前对话
+### 🕷️ 智能爬虫 (Scraping)
+- **PRTS Wiki 深度适配**：支持干员信息、主线/活动剧情、特殊关卡等内容的自动化采集。
+- **自动增量验证**：对比在线列表与本地文件，自动识别缺失内容，实现秒级增量更新。
+- **元数据自动注入**：爬取过程中自动提取剧情角色、对话数、干员星级等关键元数据。
 
 ## 📁 项目结构
 
-### 🏗️ 模块化架构
-
 ```
 ai_agent/
-├── src/                                # 模块化源代码 (20个文件)
-│   ├── main.py                         # 主入口点
-│   ├── config/                         # 配置模块
-│   │   ├── llm_config.py              # LLM 和 Chroma 客户端配置
-│   │   ├── embeddings.py              # 嵌入模型配置
-│   │   └── retriever.py               # 检索器配置
-│   ├── agents/                         # 代理模块
-│   │   ├── base_agent.py              # 基础代理抽象类
-│   │   ├── chat_agent.py              # 纯聊天代理
-│   │   └── rag_agent.py               # RAG 代理
-│   ├── streaming/                      # 流式处理
-│   │   ├── processor.py               # 流式处理器
-│   │   └── output_formatter.py        # 输出格式化
-│   └── utils/                          # 工具函数
-│       ├── token_counter.py           # Token 计数
-│       ├── reasoning.py               # 推理细节提取
-│       └── arg_parser.py              # 参数解析
-│
-├── context_compressor.py               # 上下文压缩模块
-├── chroma_query_tool.py                # ChromaDB 查询工具
-├── ingest_md.py                        # 文档入库工具
-├── requirements.txt                    # 依赖清单
-├── .env                                # 环境变量
-└── docker-compose.yml                 # Chroma 服务
+├── src/
+│   ├── main.py                # 应用入口
+│   ├── cli/                   # PRTS DB CLI 工具集
+│   ├── agents/                # Agent 实现 (Base, Chat, RAG)
+│   ├── rag/                   # RAG 核心逻辑 (Scrapers, Pipelines, Enhanced Retrieval)
+│   ├── data/                  # 数据处理 (Ingestion, Distillation, Scraping)
+│   ├── config/                # 统一配置 (LLM, Embeddings, Env)
+│   ├── streaming/             # 流式输出处理
+│   └── utils/                 # 工具类 (Memory, Token Counter, Verifier)
+├── docs/
+│   ├── prts/                  # 原始文档库
+│   └── prts_distilled/        # 提炼版文档库
+├── prts_db_cli.py             # 统一数据库管理工具
+├── scrape_prts.py             # 智能爬虫脚本
+└── requirements.txt           # 依赖清单
 ```
 
-## 🛠️ 环境准备
+## 🛠️ 快速开始
 
-### 1. 创建并激活 Python 虚拟环境
+### 1. 环境准备
 ```bash
-# 创建虚拟环境
-python -m venv .venv
-
-# 激活虚拟环境 (Linux/macOS)
-source .venv/bin/activate
-
-# 激活虚拟环境 (Windows)
-.venv\Scripts\activate
-```
-
-### 2. 安装依赖
-```bash
-cd ai_agent
+# 安装依赖
 pip install -r requirements.txt
+pip install transformers  # 用于上下文压缩
 
-# 压缩功能额外依赖
-pip install transformers
-
-# 向量嵌入模型（首次使用自动下载）
-# sentence-transformers/all-MiniLM-L6-v2 (~70MB)
+# 下载预训练模型（推荐）
+python download_models.py
 ```
 
-### 2. 配置 .env
+### 2. 配置环境变量
+创建 `.env` 文件：
 ```bash
-# .env
-OPENAI_API_KEY=your_api_key
+ANTHROPIC_API_KEY=your_key  # 或 OPENAI_API_KEY
 OPENAI_MODEL=MiniMax-M2
-OPENAI_BASE_URL=https://api.minimax.io/v1
-OPENAI_SYSTEM_PROMPT=You are a helpful assistant for software development.
-
-# 嵌入模型配置（新增）
+OPENAI_BASE_URL=https://api.minimaxi.com/anthropic
 EMBED_MODEL_NAME=BAAI/bge-large-zh-v1.5
 ```
 
-## 🚀 使用说明
-
-### VS Code 调试（推荐）
-
-项目提供 5 个预配置的 VS Code 启动配置：
-
-1. **Python: Agent (src.main) - Chat** - 基础聊天模式
-2. **Python: Agent (src.main) - RAG** - RAG 检索增强模式
-3. **Python: Agent (src.main) - Chat + Compression** - 压缩模式
-4. **Python: Ingest Markdown (ingest_md.py)** - 文档入库工具
-5. **Python: Chroma Query Tool** - 查询工具
-
-直接按 `F5` 或在 VS Code 中选择配置运行即可。
-
-### 命令行使用
-
-项目的主入口点是 `src/main.py`。
-
-#### 基础聊天
-
+### 3. 数据准备 (三步曲)
 ```bash
-# 交互式聊天
-python src/main.p
-o
+# 第一步：爬取 PRTS Wiki 内容 (带自动验证)
+python scrape_prts.py --type characters
+python scrape_prts.py --type stories
 
-# 自定义系统提示词
-python src/main.py --system "You are a helpful assistant."
+# 第二步：启动交互式 CLI 进行管理
+python prts_db_cli.py
+# (在菜单中选择 3 进行知识提炼，选择 2 进行统一入库)
 ```
 
-#### RAG 检索增强
-
+### 4. 启动 PRTS 系统
 ```bash
-# 启用 RAG 模式
-python src/main.py --use-rag
+# RAG 检索模式（推荐）
+python src/main.py --use-rag --session-id "doctor-001"
 
-# 指定 ChromaDB 服务器
-python src/main.py --use-rag --chroma-host localhost --chroma-port 9000
-
-# 使用过滤器进行精准检索
-python src/main.py --use-rag \
-  --collection md_docs \
-  --category "技术文档" \
-  --subcategory "AI"
+# 启用精炼内容优先模式
+python src/main.py --use-rag --prefer-distilled
 ```
 
-#### 上下文自动压缩
+## 🚀 进阶用法
 
-```bash
-# 启用上下文压缩
-python src/main.py --enable-compression
+### 数据库管理 CLI (`prts_db_cli.py`)
+交互式菜单支持：
+1. **Query**: 语义搜索、统计分析、元数据检查。
+2. **Ingest**: 原始/提炼文档的单项或混合入库。
+3. **Distill**: 批量生成提炼版文档，跳过已处理文件。
+4. **Delete**: 安全删除 Collection（带二次确认）。
 
-# RAG + 压缩
-python src/main.py --use-rag --enable-compression
+### 智能爬虫参数
+- `--verify-only`: 仅检查缺失，不执行下载。
+- `--max-concurrent`: 设置并发数（默认 5-8，建议不要过高）。
+- `--type [characters|stories|all]`: 选择采集类型。
 
-# 自定义压缩后的最大 token 数
-python src/main.py --enable-compression --max-tokens 80000
-```
-
-#### 超时控制
-
-```bash
-# 设置 600 秒超时
-python src/main.py --timeout 600
-
-# 对于长对话，建议设置较长超时
-python src/main.py --use-rag --timeout 600 --enable-compression
-```
-
-#### 会话记忆管理
-
-```bash
-# 启用会话记忆（需要 ChromaDB 运行）
-python src/main.py --session-id "my-session-001"
-
-# 指定记忆集合名称（默认：agent_memory）
-python src/main.py --session-id "my-session-001" --memory-collection "my_memory"
-
-# 设置检索记忆数量（默认：5）
-python src/main.py --session-id "my-session-001" --memory-k 10
-
-# 组合使用：RAG + 压缩 + 记忆
-python src/main.py --use-rag --enable-compression --session-id "dev-session" --timeout 600
-
-# 使用不同的会话 ID 创建独立对话
-python src/main.py --session-id "session-A"
-```
-
----
-
-## 📊 命令行参数详解
-
-### 基础参数
-- `-s, --system`: 设置系统提示词
-- `-m, --model`: 指定语言模型名称 (默认: `MiniMax-M2`)
-- `-u, --base-url`: 指定 OpenAI 兼容的 API 地址 (默认: `https://api.minimax.io/v1`)
-- `-t, --temperature`: 设置采样温度 (默认: `0.5`)
-- `--timeout`: 请求超时时间 (默认: `300` 秒)
-
-### RAG 参数
-- `--use-rag`: 启用 RAG 模式
-- `--collection`: 指定 ChromaDB collection 名称 (默认: `md_docs`)
-- `--chroma-host`: ChromaDB 服务器地址 (默认: `localhost`)
-- `--chroma-port`: ChromaDB 服务器端口 (默认: `9000`)
-- `--top-k`: 检索文档数量 (默认: `4`)
-- `--embed-model`: 嵌入模型名称 (默认: `BAAI/bge-large-zh-v1.5`)，优先使用环境变量`EMBED_MODEL_NAME`
-
-### 过滤参数 (仅用于 RAG 模式)
-- `--category`: 按类别过滤 (如: 'AI/RAG', 'Backend', 'Frontend')
-- `--subcategory`: 按子类别过滤 (如: 'RAG', 'Go', 'Python')
-- `--topic`: 按主题过滤
-- `--language`: 按编程语言过滤 (如: 'Go', 'Python', 'JavaScript')
-
-### 压缩参数
-- `--enable-compression`: 启用上下文自动压缩
-- `--disable-compression`: 禁用上下文压缩
-- `--max-tokens`: 上下文压缩后的最大 token 数 (默认: `80000`)
-
-### 记忆参数
-- `--session-id`: 启用会话记忆并指定会话 ID
-- `--memory-collection`: 指定记忆存储集合名称 (默认: `agent_memory`)
-- `--memory-k`: 检索记忆的数量 (默认: `5`)
-
-## 🔧 工具使用
-
-### 文档入库工具
-
-```bash
-# 使用 VS Code 配置运行
-# Python: Ingest Markdown (ingest_md.py)
-
-# 或命令行运行
-python ingest_md.py --docs-dir ./docs --chroma-host localhost --chroma-port 9000
-```
-
-### ChromaDB 查询工具
-
-```bash
-# 使用 VS Code 配置运行
-# Python: Chroma Query Tool
-
-# 或命令行运行
-python chroma_query_tool.py --host localhost --port 9000
-```
-
-## 🛠️ ChromaDB 服务
-
-### 启动 ChromaDB
-```bash
-docker compose up -d
-```
-
-### 检查服务状态
-```bash
-docker compose ps
-```
-
-### 查看服务日志
-```bash
-docker compose logs chromadb
-```
-
-### 停止服务
-```bash
-docker compose down
-```
-
-## 📈 性能指标
-
-### 压缩效果
-- Token 使用减少：**60-80%**
-- 响应时间提升：**60%**
-- API 成本节省：**60-70%**
-- 准确性保持：**95%+**
-
-### RAG 检索
-- 向量检索速度：**<100ms**
-- Top-K 检索准确率：**90%+**
-- 支持文档数量：**百万级**
-- 支持元数据维度：**10+**
-
-## 🆘 常见问题
-
-### API 相关
-- **ModuleNotFoundError: No module named 'config'**：
-  - 确保从正确目录运行：`cd src && python main.py`
-  - 或使用 VS Code 调试配置（已正确配置 PYTHONPATH）
-
-- **OPENAI_API_KEY 错误**：检查 `.env` 文件和 API Key 有效性
-- **401/403/404 错误**：确认 base_url、模型名称和权限配置
-- **Request timed out**：使用 `--timeout` 参数增加超时时间
-
-### ChromaDB 相关
-- **连接失败**：确认 Docker 服务运行 `docker compose ps`
-- **端口占用**：检查端口 `lsof -i :9000`
-- **容器日志**：`docker compose logs chromadb`
-
-### 压缩功能相关
-- **依赖缺失**：`pip install transformers`
-- **性能问题**：调整 `--max-tokens` 参数
-- **内存不足**：降低压缩频率或减少上下文长度
+## 📊 性能指标
+- **压缩率**: 历史记录压缩 **60-80%**。
+- **检索延迟**: 本地向量检索 **<100ms**。
+- **存储效率**: 提炼版文档显著降低 token 消耗。
 
 ## 📝 更新日志
 
-### v0.3.1 - 2025-11-22 - 🔧 RAG优化
-- ✨ **嵌入模型统一**：所有嵌入模型配置统一使用环境变量`EMBED_MODEL_NAME`控制
-- ✨ **默认模型更新**：默认嵌入模型从`sentence-transformers/all-MiniLM-L6-v2`更新为`BAAI/bge-large-zh-v1.5`，提升中文理解能力
+### v0.4.0 - 2026-01-08 - 🛡️ 统筹管理版
+- ✨ **PRTS DB CLI**：新增统一的交互式数据库管理工具。
+- ✨ **智能增量验证**：爬虫支持在线/本地内容自动对比。
+- ✨ **优先检索策略**：支持 `is_distilled` 标记，优先读取精炼知识。
+- 🔧 **架构重构**：将数据处理逻辑迁移至 `src/data` 和 `src/rag` 模块化目录。
 
-### v0.3 - 2025-11-21 - 💾 会话记忆
-- ✨ **会话记忆管理**：基于 ChromaDB 的持久化对话记忆
-- 🔍 **语义检索**：自动检索相关历史对话内容
-- 🎯 **多会话支持**：支持多个独立会话的并行管理
-- ⚡ **智能整合**：自动将相关记忆整合到当前对话上下文
-- 🔧 **配置灵活**：支持--show-thinking/--hide-thinking命令行参数
-
-### v0.2.8 - 2025-11-11 - 🧹 项目清理版
-- 🧹 **项目清理**：删除冗余文件和空目录
-- ✅ **代码优化**：修复请求超时问题，添加 `--timeout` 参数
-- 🔧 **模块导入**：修复 `src/main.py` 模块导入问题
-- 📚 **文档更新**：更新 README 和 VS Code 配置
-- 🗑️ **删除内容**：
-  - 删除 `lc_agent.py`（包装器文件）
-  - 删除根目录 `main.py`（功能重叠）
-  - 删除空目录 `scripts/` 和 `chroma_data/`
-  - 清理 VS Code 配置（移除失效配置）
-
-### v0.2.7 - 2025-11-11 - 🎊 重构版本
-- ✨ **重大重构**：模块化设计，17 个新模块
-- ✨ **流式输出优化**：实时显示 thinking 和 answers
-- ✨ **思考可见**：`[thinking]` 和 `[answers]` 标签展示
-- ✨ **Token 统计增强**：实时显示使用量和百分比
-- 🔧 **代码组织**：职责分离，代码复用率提升
-
-### v.0.2
-- ✨ **RAG 检索增强**：ChromaDB 向量检索
-- ✨ **上下文压缩**：智能压缩长对话
-- ✨ **流式输出**：实时响应显示
-- ✨ **文档分类**：自动分类入库
-
-### v.0.1
-- ✨ **AI聊天助手**：单轮or持续对话，上下文理解
+### v0.3.1 - 2025-11-22 - 🔧 RAG 优化
+- ✨ **嵌入模型统一**：全面转向 `BAAI/bge-large-zh-v1.5`，大幅提升中文理解力。
 
 ## 📄 许可证
-
 本项目采用 MIT 许可证。
 
-## 🤝 贡献
-
-欢迎提交 Issue 和 Pull Request！
-
 ---
-
-**项目状态**：✅ 活跃维护中
-**最后更新**：2025-11-24
-**版本**：v0.3.1 (配置优化版)
+**[STATUS]** 系统状态: 正常 | **[AUTH]** 权限确认: 博士

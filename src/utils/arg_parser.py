@@ -49,16 +49,11 @@ def parse_args() -> argparse.Namespace:
         default=os.getenv("USE_ANTHROPIC", "false").lower() == "true",
         help="Use Anthropic SDK instead of OpenAI-compatible interface (default from env USE_ANTHROPIC or false)",
     )
-    # RAG options
-    parser.add_argument(
-        "--use-rag",
-        action="store_true",
-        help="Enable retrieval from Chroma before answering"
-    )
+    # RAG options (now default)
     parser.add_argument(
         "--collection",
         type=str,
-        default=os.getenv("CHROMA_COLLECTION", "md_docs"),
+        default=os.getenv("CHROMA_COLLECTION", "prts_wiki"),
         help="Chroma collection name"
     )
     parser.add_argument(
@@ -125,8 +120,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-tokens",
         type=int,
-        default=int(os.getenv("MAX_TOKENS", "80000")),
-        help="Maximum token limit for context compression (default from env MAX_TOKENS or 80000)"
+        default=int(os.getenv("MAX_TOKENS", "10000")),
+        help="Maximum token limit for context compression (default from env MAX_TOKENS or 10000)"
     )
 
     # Memory options
@@ -146,14 +141,6 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=int(os.getenv("MEMORY_K", "5")),
         help="检索历史记忆的数量（default from env MEMORY_K or 5）"
-    )
-
-    # Dual output (JSON format) options
-    parser.add_argument(
-        "--disable-dual-output",
-        action="store_true",
-        default=False,
-        help="禁用 JSON 双输出格式（摘要+内容）"
     )
 
     # Thinking process display options

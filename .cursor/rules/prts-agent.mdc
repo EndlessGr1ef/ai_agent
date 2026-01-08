@@ -83,7 +83,7 @@ characters: 角色1, 角色2
 ## ChromaDB 元数据
 
 | 字段 | 说明 |
-|------|------|
+|---|---|
 | `category` | Arknights |
 | `subcategory` | Operator / MainStory / EventStory |
 | `doc_type` | story / operator / general |
@@ -98,7 +98,7 @@ characters: 角色1, 角色2
 ## 明日方舟术语
 
 | 术语 | 说明 |
-|------|------|
+|---|---|
 | 源石 Originium | 泰拉大陆特殊矿物 |
 | 矿石病 Oripathy | 源石导致的不治之症 |
 | 感染者 Infected | 矿石病患者 |
@@ -122,3 +122,4 @@ characters: 角色1, 角色2
 2. 使用 `BAAI/bge-large-zh-v1.5` 嵌入模型
 3. 爬虫并发 5-8，避免重复爬取
 4. 确保文档包含完整分类元数据
+5. **重要**: 在对原始文档进行提炼 (Distill) 或创建总结文档前，必须先征得博士 (用户) 的同意。

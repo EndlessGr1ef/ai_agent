@@ -21,7 +21,7 @@ sys.path.insert(0, str(src_path))
 
 from config.llm_config import build_llm, require_api_key
 from config.retriever import build_retriever
-from agents import ChatAgent, RagAgent
+from agents import RagAgent
 from utils.arg_parser import parse_args
 
 
@@ -102,92 +102,64 @@ def main() -> None:
     # Determine thinking display mode from command line args
     show_thinking = args.show_thinking and not args.hide_thinking
 
-    # Choose and run the appropriate agent
-    if args.use_rag:
-        try:
-            retriever = build_retriever(
-                collection_name=args.collection,
-                host=args.chroma_host,
-                port=args.chroma_port,
-                embed_model_name=args.embed_model,
-                top_k=args.top_k,
-                category_filter=args.category,
-                subcategory_filter=args.subcategory,
-                topic_filter=args.topic,
-                language_filter=args.language,
-            )
-        except Exception as e:
-            print(f"[Error] Failed to initialize retriever: {e}")
-            print("[Info] Falling back to normal chat mode.")
-            # Fallback to chat mode
-            agent = ChatAgent(
-                llm=llm,
-                system_prompt=args.system,
-                compressor=compressor,
-                enable_compression=args.enable_compression,
-                session_id=args.session_id,
-                memory_manager=memory_manager,
-                memory_k=args.memory_k
-            )
-            agent.output_formatter.show_thinking = show_thinking
-            agent.run()
-            return
-
-        # Print active filters
-        if any([args.category, args.subcategory, args.topic, args.language]):
-            print("\n" + "="*60)
-            print("Active Filters:")
-            if args.category:
-                print(f"  Category: {args.category}")
-            if args.subcategory:
-                print(f"  Subcategory: {args.subcategory}")
-            if args.topic:
-                print(f"  Topic: {args.topic}")
-            if args.language:
-                print(f"  Language: {args.language}")
-            print("="*60 + "\n")
-
-        # Run RAG agent with PRTS mode
-        use_dual_output = not args.disable_dual_output
-        
-        # Determine system prompt: use None to enable default PRTS prompt
-        # unless user explicitly specified a custom prompt via -s or env var
-        default_prompt = "You are a helpful assistant for software development."
-        system_prompt = None if args.system == default_prompt else args.system
-        
-        if system_prompt is None:
-            print("✓ PRTS 模式已启用")
-        
-        agent = RagAgent(
-            llm=llm,
-            retriever=retriever,
-            system_prompt=system_prompt,
-            compressor=compressor,
-            enable_compression=args.enable_compression,
-            session_id=args.session_id,
-            memory_manager=memory_manager,
-            memory_k=args.memory_k,
-            use_dual_output=use_dual_output,
-            use_anthropic_sdk=use_anthropic
+    # Initialize retriever
+    retriever = None
+    try:
+        retriever = build_retriever(
+            collection_name=args.collection,
+            host=args.chroma_host,
+            port=args.chroma_port,
+            embed_model_name=args.embed_model,
+            top_k=args.top_k,
+            category_filter=args.category,
+            subcategory_filter=args.subcategory,
+            topic_filter=args.topic,
+            language_filter=args.language,
         )
-        agent.output_formatter.show_thinking = show_thinking
-        agent.run()
-    else:
-        # Run chat agent
-        use_dual_output = not args.disable_dual_output
-        agent = ChatAgent(
-            llm=llm,
-            system_prompt=args.system,
-            compressor=compressor,
-            enable_compression=args.enable_compression,
-            session_id=args.session_id,
-            memory_manager=memory_manager,
-            memory_k=args.memory_k,
-            use_dual_output=use_dual_output,
-            use_anthropic_sdk=use_anthropic
-        )
-        agent.output_formatter.show_thinking = show_thinking
-        agent.run()
+    except Exception as e:
+        print(f"[WARN] 罗德岛数据库连接受限: {e}")
+        print("[INFO] PRTS 将进入离线模式运行。")
+
+    # Print active filters if retriever is active
+    if retriever and any([args.category, args.subcategory, args.topic, args.language]):
+        print("\n" + "="*60)
+        print("Active Filters:")
+        if args.category:
+            print(f"  Category: {args.category}")
+        if args.subcategory:
+            print(f"  Subcategory: {args.subcategory}")
+        if args.topic:
+            print(f"  Topic: {args.topic}")
+        if args.language:
+            print(f"  Language: {args.language}")
+        print("="*60 + "\n")
+
+    # Run RAG agent with PRTS mode
+    use_dual_output = True
+    
+    # Determine system prompt: use None to enable default PRTS prompt
+    # unless user explicitly specified a custom prompt via -s or env var
+    default_prompt = "You are a helpful assistant for software development."
+    system_prompt = None if args.system == default_prompt else args.system
+    
+    if system_prompt is None:
+        # PRTS mode is always enabled now as it's the only mode
+        pass
+    
+    agent = RagAgent(
+        llm=llm,
+        retriever=retriever,
+        system_prompt=system_prompt,
+        compressor=compressor,
+        enable_compression=args.enable_compression,
+        session_id=args.session_id,
+        memory_manager=memory_manager,
+        memory_k=args.memory_k,
+        use_dual_output=use_dual_output,
+        use_anthropic_sdk=use_anthropic
+    )
+    agent.output_formatter.show_thinking = show_thinking
+    agent.run()
 
 
 if __name__ == "__main__":

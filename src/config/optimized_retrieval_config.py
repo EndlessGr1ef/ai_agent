@@ -43,6 +43,10 @@ class OptimizedRetrievalConfig:
             "chunk_size": 1000,    # Standard for API docs
             "chunk_overlap": 200
         },
+        "distilled": {
+            "chunk_size": 2500,    # Larger for distilled content to keep as single semantic unit
+            "chunk_overlap": 200
+        },
         "default": {
             "chunk_size": 1000,    # Fallback
             "chunk_overlap": 200
@@ -51,12 +55,12 @@ class OptimizedRetrievalConfig:
     
     # ========== Retrieval Parameters ==========
     # Multi-stage retrieval: retrieve more, then filter down
-    initial_retrieval_k: int = 12      # Retrieve more documents initially
-    final_result_k: int = 6            # Final number after processing
+    initial_retrieval_k: int = 30      # Increased for better recall
+    final_result_k: int = 15           # Increased for more comprehensive context
     
     # Similarity thresholds
-    similarity_threshold: float = 0.65  # Lower to be more inclusive initially
-    rerank_threshold: float = 0.75      # Higher threshold after reranking
+    similarity_threshold: float = 0.50  # Lowered to be much more inclusive initially
+    rerank_threshold: float = 0.60      # Adjusted threshold after reranking
     
     # ========== Query Enhancement ==========
     enable_query_expansion: bool = True
@@ -75,7 +79,7 @@ class OptimizedRetrievalConfig:
     # - "BAAI/bge-reranker-base" - Good for technical content
     
     # ========== Context Building ==========
-    max_context_tokens: int = 8000      # Max tokens in final context
+    max_context_tokens: int = 12000     # Increased for more documents
     enable_context_compression: bool = True
     enable_source_grouping: bool = True  # Group content by source
     enable_relevance_scoring: bool = True
@@ -101,15 +105,15 @@ class OptimizedRetrievalConfig:
     log_retrieval_details: bool = False # Detailed logging (for debugging)
     
     # Success metrics thresholds
-    min_retrieval_score: float = 0.5   # Minimum acceptable retrieval score
-    target_response_time: float = 2.0  # Target retrieval time in seconds
-
-
+    min_retrieval_score: float = 0.3   # Lowered to allow more results
+    target_response_time: float = 3.0  # Increased for more complex retrieval
+    
+    
 # Predefined configurations for different scenarios
 PERFORMANCE_CONFIG = OptimizedRetrievalConfig(
     # Fast retrieval with basic quality
     embedding_model=os.getenv("EMBED_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2"),
-    initial_retrieval_k=6,
+    initial_retrieval_k=8,
     final_result_k=4,
     enable_reranking=False,
     enable_query_expansion=False,
@@ -119,23 +123,23 @@ PERFORMANCE_CONFIG = OptimizedRetrievalConfig(
 QUALITY_CONFIG = OptimizedRetrievalConfig(
     # High quality with advanced features
     embedding_model=os.getenv("EMBED_MODEL_NAME", "BAAI/bge-large-zh-v1.5"),
-    initial_retrieval_k=15,
-    final_result_k=8,
+    initial_retrieval_k=30,
+    final_result_k=15,
     enable_reranking=True,
     enable_query_expansion=True,
     enable_multi_query=True,
-    max_context_tokens=10000,
+    max_context_tokens=15000,
     reranker_model="cross-encoder/ms-marco-MiniLM-L-12-v2"
 )
 
 BALANCED_CONFIG = OptimizedRetrievalConfig(
     # Balanced performance and quality (default)
     embedding_model=os.getenv("EMBED_MODEL_NAME", "BAAI/bge-large-zh-v1.5"),
-    initial_retrieval_k=10,
-    final_result_k=6,
+    initial_retrieval_k=30,
+    final_result_k=15,
     enable_reranking=True,
     enable_query_expansion=True,
-    max_context_tokens=8000
+    max_context_tokens=12000
 )
 
 
@@ -164,7 +168,8 @@ def get_chunk_config(document_type: str, config: OptimizedRetrievalConfig) -> Di
         "code": ["code", "python", "javascript", "java", "cpp", "programming"],
         "documentation": ["doc", "documentation", "manual", "guide", "readme"],
         "tutorial": ["tutorial", "howto", "example", "demo", "walkthrough"],
-        "api": ["api", "reference", "endpoint", "swagger", "openapi"]
+        "api": ["api", "reference", "endpoint", "swagger", "openapi"],
+        "distilled": ["distilled", "summary", "refined"]
     }
     
     for chunk_type, indicators in type_mappings.items():

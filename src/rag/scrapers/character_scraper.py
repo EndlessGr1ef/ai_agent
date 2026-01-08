@@ -153,26 +153,28 @@ class CharacterScraper(PRTSWikiScraper):
     def _generate_filename(self, title: str) -> str:
         """
         生成文件名
-
+        
         Args:
             title: 干员标题
-
+            
         Returns:
             str: 文件名
         """
         import re
-        from datetime import datetime
-
-        # 清理标题
-        title = re.sub(r'[<>:"/\\|?*]', '_', title)
-        title = title.strip(' .')
-
+        
+        # 移除常见的Wiki后缀
+        name = re.sub(r'\s*-\s*PRTS.*$', '', title)
+        name = re.sub(r'\s*-\s*明日方舟.*$', '', name)
+        
+        # 清理非法字符
+        name = re.sub(r'[<>:"/\\|?*]', '_', name)
+        name = name.strip(' .')
+        
         # 限制长度
-        if len(title) > 80:
-            title = title[:80]
-
-        # 不添加时间戳
-        return f"{title}.md"
+        if len(name) > 80:
+            name = name[:80]
+            
+        return f"{name}.md"
 
     def _add_file_header(self, content: str, data: Dict[str, Any]) -> str:
         """
@@ -328,13 +330,18 @@ class CharacterScraper(PRTSWikiScraper):
                     continue
 
                 # 获取页面内容进行判断
-                await self._ensure_js_renderer()
-                page_data = await self.js_renderer.render_page(
-                    link,
-                    wait_for_function="() => document.readyState === 'complete'"
-                )
+                if self.use_js_renderer:
+                    await self._ensure_js_renderer()
+                    page_data = await self.js_renderer.render_page(
+                        link,
+                        wait_for_function="() => document.readyState === 'complete'"
+                    )
+                    html_content = page_data['html']
+                else:
+                    response = self.make_request(link)
+                    html_content = response.text
 
-                soup = BeautifulSoup(page_data['html'], 'html.parser')
+                soup = BeautifulSoup(html_content, 'html.parser')
 
                 # 检查是否为干员页面
                 if self._is_character_page(link, soup):
@@ -371,13 +378,18 @@ class CharacterScraper(PRTSWikiScraper):
 
             try:
                 # 获取页面内容
-                await self._ensure_js_renderer()
-                page_data = await self.js_renderer.render_page(
-                    current_url,
-                    wait_for_function="() => document.readyState === 'complete'"
-                )
+                if self.use_js_renderer:
+                    await self._ensure_js_renderer()
+                    page_data = await self.js_renderer.render_page(
+                        current_url,
+                        wait_for_function="() => document.readyState === 'complete'"
+                    )
+                    html_content = page_data['html']
+                else:
+                    response = self.make_request(current_url)
+                    html_content = response.text
 
-                soup = BeautifulSoup(page_data['html'], 'html.parser')
+                soup = BeautifulSoup(html_content, 'html.parser')
 
                 # 提取当前页面的链接
                 page_links = self._extract_links_from_soup(soup, current_url)
@@ -441,13 +453,18 @@ class CharacterScraper(PRTSWikiScraper):
         logger.info(f"Extracting character links from: {url}")
 
         try:
-            await self._ensure_js_renderer()
-            page_data = await self.js_renderer.render_page(
-                url,
-                wait_for_function="() => document.readyState === 'complete'"
-            )
+            if self.use_js_renderer:
+                await self._ensure_js_renderer()
+                page_data = await self.js_renderer.render_page(
+                    url,
+                    wait_for_function="() => document.readyState === 'complete'"
+                )
+                html_content = page_data['html']
+            else:
+                response = self.make_request(url)
+                html_content = response.text
 
-            soup = BeautifulSoup(page_data['html'], 'html.parser')
+            soup = BeautifulSoup(html_content, 'html.parser')
 
             # 提取所有链接
             all_links = self._extract_links_from_soup(soup, url)

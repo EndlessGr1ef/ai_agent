@@ -9,6 +9,10 @@ from urllib.parse import urljoin, urlparse
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+import urllib3
+
+# Suppress InsecureRequestWarning for unverified HTTPS requests
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +50,7 @@ class BaseScraper(ABC):
         
         # Setup session with retry strategy
         self.session = requests.Session()
+        self.session.verify = False  # Disable SSL verification due to environment issues
         retry_strategy = Retry(
             total=max_retries,
             backoff_factor=1,

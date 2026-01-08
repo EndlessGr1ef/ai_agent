@@ -3,6 +3,7 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional, Tuple, Union
 import re
+import json
 import anthropic
 
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
@@ -11,6 +12,7 @@ from langchain_openai import ChatOpenAI
 from streaming.processor import StreamProcessor
 from streaming.output_formatter import OutputFormatter
 from utils.token_counter import count_tokens_in_messages
+from utils import ToolRegistry, build_markdown_create_tool, build_web_search_tool
 
 
 class BaseAgent(ABC):
@@ -72,6 +74,106 @@ class BaseAgent(ABC):
         self.use_anthropic_sdk = use_anthropic_sdk or isinstance(llm, anthropic.Anthropic)
         self.stream_processor = StreamProcessor()
         self.output_formatter = OutputFormatter()
+        
+        # Initialize tool registry and register built-in tools
+        self.tool_registry = ToolRegistry()
+        self.tool_registry.register(build_markdown_create_tool())
+        self.tool_registry.register(build_web_search_tool())
+
+    def _try_handle_command(self, user_input: str) -> bool:
+        """
+        Handle explicit command forms like '/write'.
+        Returns True if handled.
+        """
+        if user_input.startswith('/write '):
+            # Parse format: /write <path.md> <<<\n<content>\n>>>
+            try:
+                parts = user_input[len('/write '):]
+                if '<<<' in parts and '>>>' in parts:
+                    filename, content_block = parts.split('<<<', 1)
+                    content = content_block.rsplit('>>>', 1)[0]
+                    filename = filename.strip()
+                else:
+                    # Simple one-line placeholder: /write <path.md> <content>
+                    tokens = parts.split(' ', 1)
+                    filename = tokens[0].strip()
+                    content = tokens[1].strip() if len(tokens) > 1 else ''
+
+                tool = self.tool_registry.get('markdown_create')
+                result = tool.execute({'path': filename, 'content': content})
+                if result.ok:
+                    self.output_formatter.print_hint(result.message)
+                else:
+                    self.output_formatter.print_error(result.message)
+                return True
+            except Exception as e:
+                self.output_formatter.print_error(f"/write command failed: {e}")
+                return True
+        return False
+
+    def _classify_intent(self, user_input: str) -> dict:
+        """Use LLM to classify intent and proposed tool with arguments. Returns dict or {}."""
+        sys = SystemMessage(content=(
+            "You are an intent classifier. Read the user's input and decide if it matches one of tools: "
+            "markdown_create (create a markdown file), web_search (search the web). "
+            "Return ONLY JSON with fields: intent, tool_name, arguments (object), confidence (0-1). "
+            "If no suitable tool, return intent='chat', tool_name='', arguments={}, confidence=0."
+        ))
+        hm = HumanMessage(content=user_input)
+        try:
+            # Note: For intent classification, we always use the LLM invoke method
+            # This is separate from the main streaming chat loop
+            if self.use_anthropic_sdk:
+                # Basic implementation for Anthropic intent classification if needed
+                # For now, we assume LLM is compatible with invoke() or similar
+                # If using raw Anthropic client, this might need adjustment
+                pass
+            
+            resp = self.llm.invoke([sys, hm])
+            content = getattr(resp, 'content', '')
+            content = content.strip()
+            # Extract JSON from possible code fences
+            if content.startswith('```'):
+                content = content.strip('`')
+            # Try to find first JSON object
+            match = None
+            for m in re.finditer(r'\{[\s\S]*\}', content):
+                match = m
+                break
+            if match:
+                data = json.loads(match.group(0))
+                if isinstance(data, dict):
+                    return data
+        except Exception:
+            pass
+        return {}
+
+    def _route_and_execute_tool(self, route: dict) -> Optional[str]:
+        """
+        Execute tool based on route. Returns a short summary string or None if not executed.
+        """
+        name = route.get('tool_name')
+        args = route.get('arguments') or {}
+        if not name:
+            return None
+        tool = self.tool_registry.get(name)
+        if not tool:
+            return None
+        result = tool.execute(args if isinstance(args, dict) else {})
+        if result.ok:
+            self.output_formatter.print_hint(result.message)
+            # Build a short summary to insert into conversation
+            if name == 'markdown_create':
+                p = (result.data or {}).get('path', '')
+                return f"[TOOL_RESULT: markdown_create] File created at: {p}"
+            if name == 'web_search':
+                items = (result.data or {}).get('results', [])
+                lines = [f"- {it.get('title','')} ({it.get('url','')})" for it in items]
+                return "[TOOL_RESULT: web_search]\n" + "\n".join(lines)
+            return f"[TOOL_RESULT: {name}] {result.message}"
+        else:
+            self.output_formatter.print_error(result.message)
+            return f"[TOOL_RESULT: {name}] {result.message}"
 
     def _count_tokens(self, messages: List) -> int:
         """Count tokens in messages.
