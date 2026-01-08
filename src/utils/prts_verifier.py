@@ -133,10 +133,10 @@ class PRTSVerifier:
             
             self.logger.info(f"Extracting character links from {url}")
             
-            # Create a scraper instance without JS rendering (faster and more reliable)
+            # Create a scraper instance with JS rendering enabled for dynamic content
             scraper = CharacterScraper(
                 output_dir=str(self.output_dir / "干员"),
-                use_js_renderer=False  # Use simple HTTP request
+                use_js_renderer=True  # Use JS rendering for dynamic content
             )
             
             # Use the scraper's method to extract all character links

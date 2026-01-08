@@ -131,45 +131,42 @@ def interactive_selection() -> tuple[str, str, Optional[int], str]:
 
     print(f"\n📁 输出目录: {output_dir}")
 
-    # 询问并发数（仅对剧情爬取）
+    # 询问并发数
     print("\n" + "="*60)
-    if content_type == 'story' or content_type == 'all':
-        print("⚙️  并发设置（剧情爬取）:")
-        print("   - 并发可以大幅提升抓取速度")
-        print("   - 建议设置5-8，避免被反爬虫检测")
-        print("   - 串行模式速度慢但更稳定\n")
+    print("⚙️  并发设置:")
+    print("   - 并发可以大幅提升抓取速度")
+    print("   - 建议设置5-8，避免被反爬虫检测")
+    print("   - 串行模式速度慢但更稳定\n")
 
-        while True:
-            try:
-                concurrent_input = input(
-                    f"最大并发数 [默认: 5, 输入 0 使用串行模式]: "
-                ).strip()
+    while True:
+        try:
+            concurrent_input = input(
+                f"最大并发数 [默认: 5, 输入 0 使用串行模式]: "
+            ).strip()
 
-                if not concurrent_input:
-                    max_concurrent = 5
-                else:
-                    max_concurrent = int(concurrent_input)
+            if not concurrent_input:
+                max_concurrent = 5
+            else:
+                max_concurrent = int(concurrent_input)
 
-                if max_concurrent < 0:
-                    print("❌ 并发数不能为负数")
-                    continue
-                if max_concurrent == 0:
-                    print("✅ 使用串行模式")
-                    max_concurrent = 1  # 串行模式实际上就是并发数1
-                elif max_concurrent > 10:
-                    print("⚠️  警告: 并发数过高可能导致被反爬虫检测")
+            if max_concurrent < 0:
+                print("❌ 并发数不能为负数")
+                continue
+            if max_concurrent == 0:
+                print("✅ 使用串行模式")
+                max_concurrent = 1  # 串行模式实际上就是并发数1
+            elif max_concurrent > 10:
+                print("⚠️  警告: 并发数过高可能导致被反爬虫检测")
 
-                break
+            break
 
-            except ValueError:
-                print("❌ 请输入有效数字")
-            except KeyboardInterrupt:
-                print("\n\n👋 操作已取消")
-                sys.exit(0)
+        except ValueError:
+            print("❌ 请输入有效数字")
+        except KeyboardInterrupt:
+            print("\n\n👋 操作已取消")
+            sys.exit(0)
 
-        print(f"\n⚙️  并发设置: {max_concurrent}")
-    else:
-        max_concurrent = 5  # 干员爬取默认5
+    print(f"\n⚙️  并发设置: {max_concurrent}")
 
     print("\n" + "="*60)
     print("🚀 准备开始爬取...")
@@ -178,9 +175,16 @@ def interactive_selection() -> tuple[str, str, Optional[int], str]:
     return content_type, url, max_pages, output_dir, max_concurrent
 
 
-async def scrape_characters(url: str, max_pages: Optional[int], output_dir: str, no_js_render: bool = False, skip_verification: bool = False):
+async def scrape_characters(url: str, max_pages: Optional[int], output_dir: str, max_concurrent: int = 5, no_js_render: bool = False, skip_verification: bool = False):
     """爬取干员信息"""
     print("📋 正在初始化干员爬虫...")
+
+    # 检查是否使用并发模式
+    use_parallel = max_concurrent > 1
+    if use_parallel:
+        print(f"🚀 使用并发模式 (并发数: {max_concurrent})")
+    else:
+        print("🔄 使用串行模式")
 
     scraper = CharacterScraper(output_dir=output_dir, use_js_renderer=not no_js_render)
 
@@ -218,15 +222,8 @@ async def scrape_characters(url: str, max_pages: Optional[int], output_dir: str,
         print("="*60 + "\n")
     else:
         print("🔍 正在提取干员链接...")
-        # 获取所有干员链接
-        character_links_to_scrape = await scraper._extract_all_character_links_with_pagination(url)
-
-    if max_pages and not skip_verification:
-        # 如果指定了最大页数，限制链接数量
-        links_per_page = 15
-        max_links = max_pages * links_per_page
-        character_links_to_scrape = character_links_to_scrape[:max_links]
-        print(f"⚠️  已限制数量：{len(character_links_to_scrape)} 个干员 (来自前{max_pages}页)")
+        # 获取所有干员链接（分页函数内部会根据 max_pages 限制页数）
+        character_links_to_scrape = await scraper._extract_all_character_links_with_pagination(url, max_pages)
 
     if not character_links_to_scrape:
         print("❌ 未找到任何需要爬取的干员链接")
@@ -235,41 +232,62 @@ async def scrape_characters(url: str, max_pages: Optional[int], output_dir: str,
     # 批量爬取
     print(f"\n🚀 开始{'增量' if not skip_verification else ''}爬取干员信息...")
     print(f"📊 总数: {len(character_links_to_scrape)}")
+    if use_parallel:
+        print(f"⚡ 并发模式 - 同时处理 {max_concurrent} 个页面")
+    else:
+        print("🔄 串行模式 - 逐个处理页面")
 
+    # 并发爬取
+    if use_parallel:
+        results = await _scrape_characters_parallel(scraper, character_links_to_scrape, max_concurrent)
+    else:
+        # 串行爬取
+        results = []
+        for i, link in enumerate(character_links_to_scrape, 1):
+            print(f"\r⏳ 进度: {i}/{len(character_links_to_scrape)} - {link[:50]}...", end='', flush=True)
+
+            try:
+                result = await scraper.extract_single_character(link)
+                results.append(result)
+            except Exception as e:
+                results.append({
+                    'success': False,
+                    'url': link,
+                    'error': str(e)
+                })
+
+            await asyncio.sleep(scraper.delay_range[0])
+
+        print("\n")
+
+
+async def _scrape_characters_parallel(scraper, links: list, max_concurrent: int) -> list:
+    """并发爬取干员"""
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def scrape_with_semaphore(link):
+        async with semaphore:
+            # 添加延迟避免请求过快
+            await asyncio.sleep(scraper.delay_range[0])
+            try:
+                return await scraper.extract_single_character(link)
+            except Exception as e:
+                return {
+                    'success': False,
+                    'url': link,
+                    'error': str(e)
+                }
+
+    tasks = [scrape_with_semaphore(link) for link in links]
     results = []
-    for i, link in enumerate(character_links_to_scrape, 1):
-        print(f"\r⏳ 进度: {i}/{len(character_links_to_scrape)} - {link[:50]}...", end='', flush=True)
 
-        try:
-            # Use extract_single_character which handles file existence check
-            result = await scraper.extract_single_character(link)
-            results.append(result)
-        except Exception as e:
-            results.append({
-                'success': False,
-                'url': link,
-                'error': str(e)
-            })
-
-        # 添加延迟
-        await asyncio.sleep(scraper.delay_range[0])
+    for i, task in enumerate(asyncio.as_completed(tasks), 1):
+        result = await task
+        results.append(result)
+        print(f"\r⏳ 进度: {i}/{len(links)} - {result.get('url', '')[:50] if result.get('url') else 'Unknown'}...", end='', flush=True)
 
     print("\n")
-
-    # 统计结果
-    success_count = sum(1 for r in results if r.get('success'))
-    skipped_count = sum(1 for r in results if r.get('skipped'))
-    failed_count = len(results) - success_count - skipped_count
-
-    print("\n" + "="*60)
-    print("🎉 干员爬取完成!")
-    print("="*60)
-    print(f"✅ 成功: {success_count}")
-    print(f"⏭️  跳过 (已存在): {skipped_count}")
-    print(f"❌ 失败: {failed_count}")
-    print(f"📈 成功率: {success_count/len(results)*100:.1f}%")
-    print(f"📁 输出目录: {scraper.output_dir}/")
-    print("="*60 + "\n")
+    return results
 
 
 async def scrape_stories(url: str, max_stories: Optional[int], output_dir: str, max_concurrent: int = 5, skip_verification: bool = False):
@@ -385,7 +403,7 @@ async def scrape_all(max_pages: Optional[int], output_dir: str, max_concurrent: 
     print("📋 阶段 1/2: 爬取干员信息")
     print("="*60 + "\n")
 
-    await scrape_characters(CHARACTER_LIST_URL, max_pages, output_dir, no_js_render, skip_verification)
+    await scrape_characters(CHARACTER_LIST_URL, max_pages, output_dir, max_concurrent, no_js_render, skip_verification)
 
     print("\n" + "="*60)
     print("📋 阶段 2/2: 爬取剧情内容")
@@ -613,7 +631,7 @@ async def main():
             await scrape_all(max_count, output_dir, max_concurrent, args.no_js_render, args.skip_verification)
         elif content_type in ['characters', 'character']:
             # 干员信息
-            await scrape_characters(url, max_count, output_dir, args.no_js_render, args.skip_verification)
+            await scrape_characters(url, max_count, output_dir, max_concurrent, args.no_js_render, args.skip_verification)
         elif content_type in ['stories', 'story']:
             # 剧情内容
             await scrape_stories(url, max_count, output_dir, max_concurrent, args.skip_verification)
