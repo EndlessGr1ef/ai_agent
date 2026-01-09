@@ -72,10 +72,11 @@ class OptimizedRetrievalConfig:
     
     # ========== Reranking Configuration ==========
     enable_reranking: bool = True
-    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-    
+    reranker_model: str = "BAAI/bge-reranker-v2-m3"
+
     # Alternative rerankers:
-    # - "cross-encoder/ms-marco-MiniLM-L-12-v2" - Better but slower
+    # - "cross-encoder/ms-marco-MiniLM-L-6-v2" - Fast, lightweight
+    # - "cross-encoder/ms-marco-MiniLM-L-12-v2" - Better accuracy
     # - "BAAI/bge-reranker-base" - Good for technical content
     
     # ========== Context Building ==========
@@ -129,16 +130,17 @@ QUALITY_CONFIG = OptimizedRetrievalConfig(
     enable_query_expansion=True,
     enable_multi_query=True,
     max_context_tokens=15000,
-    reranker_model="cross-encoder/ms-marco-MiniLM-L-12-v2"
+    reranker_model="BAAI/bge-reranker-v2-m3"
 )
 
 BALANCED_CONFIG = OptimizedRetrievalConfig(
-    # Balanced performance and quality (default)
+    # Balanced with higher precision to reduce hallucinations
     embedding_model=os.getenv("EMBED_MODEL_NAME", "BAAI/bge-large-zh-v1.5"),
-    initial_retrieval_k=30,
-    final_result_k=15,
+    initial_retrieval_k=15,        # Reduced from 30 (less noise)
+    final_result_k=8,              # Reduced from 15 (focus on most relevant)
     enable_reranking=True,
-    enable_query_expansion=True,
+    enable_query_expansion=False,  # Disabled to reduce noise from synonyms
+    enable_multi_query=False,      # Disabled to reduce query variants
     max_context_tokens=12000
 )
 

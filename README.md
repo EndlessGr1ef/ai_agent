@@ -46,14 +46,30 @@ ai_agent/
 ## 🛠️ 快速开始
 
 ### 1. 环境准备
+
+推荐使用 [uv](https://docs.astral.sh/uv/) 进行环境管理，速度更快且能自动处理依赖冲突。
+
+#### 方式 A: 使用 uv (推荐)
+```bash
+# 安装依赖
+uv pip install -r requirements.txt
+uv pip install transformers  # 用于上下文压缩
+
+# 下载预训练模型
+uv run download_models.py
+```
+
+#### 方式 B: 使用传统 pip
 ```bash
 # 安装依赖
 pip install -r requirements.txt
-pip install transformers  # 用于上下文压缩
+pip install transformers
 
-# 下载预训练模型（推荐）
+# 下载预训练模型
 python download_models.py
 ```
+
+> **💡 提示**: 如果您使用 `uv` 管理环境，后续所有 `python` 命令（如 `python main.py`）均可替换为 `uv run`（如 `uv run python main.py`）以确保使用正确的虚拟环境。
 
 ### 2. 配置环境变量
 创建 `.env` 文件：

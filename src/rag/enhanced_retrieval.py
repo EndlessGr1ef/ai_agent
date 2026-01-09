@@ -41,7 +41,7 @@ class RetrievalConfig:
     
     # Reranking settings
     use_reranking: bool = True
-    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    reranker_model: str = "BAAI/bge-reranker-v2-m3"
     
     # Query enhancement - disable rewrite for speed
     enable_query_expansion: bool = True
