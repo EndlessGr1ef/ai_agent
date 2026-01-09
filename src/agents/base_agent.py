@@ -409,9 +409,6 @@ class BaseAgent(ABC):
 
         # Get model from environment
         # Available models (via Anthropic-compatible API):
-        # - MiniMax-M2.1: faster (~60 tps), recommended (default)
-        # - MiniMax-M2: stable, has deep thinking
-        # - MiniMax-M2.1-lightning: fastest (~100 tps) but requires Coding Plan subscription
         model_name = os.getenv("OPENAI_MODEL", "MiniMax-M2.1")
         
         # Create stream using Anthropic SDK

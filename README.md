@@ -75,7 +75,7 @@ python download_models.py
 创建 `.env` 文件：
 ```bash
 ANTHROPIC_API_KEY=your_key  # 或 OPENAI_API_KEY
-OPENAI_MODEL=MiniMax-M2
+OPENAI_MODEL=MiniMax-M2.1
 OPENAI_BASE_URL=https://api.minimaxi.com/anthropic
 EMBED_MODEL_NAME=BAAI/bge-large-zh-v1.5
 ```
